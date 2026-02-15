@@ -85,6 +85,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/profile/:artistId" element={<ProfilePage />} />
       </Routes>
     </BrowserRouter>
   );

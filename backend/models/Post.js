@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema({
 
 // Post Schema
 const postSchema = new mongoose.Schema({
+  artistId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },
   user: { type: String, required: true },
   url: { type: String, required: true },
   likes: { type: Number, default: 0 },

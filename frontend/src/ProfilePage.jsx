@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useParams } from "react-router-dom";
 import Post from "./Post";
 
 const BACKEND_URL = "http://localhost:3001";
@@ -46,6 +47,8 @@ const checkIsAI = async (file) => {
 // 2. MAIN COMPONENT
 // ==========================================
 const ProfilePage = () => {
+  const { artistId } = useParams();
+  const resolvedArtistId = (artistId || "").match(/[a-f0-9]{24}/i)?.[0];
   const fileInputRef = useRef(null);
   const [isProtected, setIsProtected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -56,6 +59,12 @@ const ProfilePage = () => {
   const [newTags, setNewTags] = useState("");
   const [newImageFile, setNewImageFile] = useState(null);
   const [newTitle, setNewTitle] = useState("");
+  const [newAccountUsername, setNewAccountUsername] = useState("");
+  const [newAccountBio, setNewAccountBio] = useState("");
+  const [newAccountFollowers, setNewAccountFollowers] = useState("");
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [profileError, setProfileError] = useState("");
   const toggleButton = async (postId) => {
     const wasLiked = !!likedPosts[postId];
     const delta = wasLiked ? -1 : 1;
@@ -120,18 +129,69 @@ const ProfilePage = () => {
   };
   //   const [newComment, setNewComment] = useState("");
 
-  const [user] = useState({
+  const defaultUser = {
     username: "Loom_Artist_01",
     profilePic:
       "/assets/handprint-primitive-man-cave-black-600nw-2503552171.png",
-    followers: "67",
-    following: "67",
-    bio: "biobiobiobio",
-  });
+    bio: "",
+    followersCount: 0,
+    following: [],
+  };
+
+  const [user, setUser] = useState(null);
 
   const [posts, setPosts] = useState([]);
 
+  const normalizeId = (value) => {
+    if (!value) return undefined;
+    if (typeof value === "string") return value;
+    if (typeof value === "object" && value.$oid) return value.$oid;
+    return String(value);
+  };
+
+  const currentUser = user || defaultUser;
+  const currentUserId = normalizeId(currentUser?._id);
+  const visiblePosts = posts.filter((post) => {
+    const postArtistId = normalizeId(
+      post.artistId || (typeof post.user === "object" ? post.user._id : undefined)
+    );
+    const postUsername =
+      typeof post.user === "object" ? post.user.username : post.user;
+
+    if (resolvedArtistId) {
+      return String(postArtistId) === String(resolvedArtistId);
+    }
+
+    if (currentUserId && postArtistId) {
+      return String(postArtistId) === String(currentUserId);
+    }
+
+    if (currentUser?.username) {
+      return postUsername === currentUser.username;
+    }
+
+    return true;
+  });
+
   useEffect(() => {
+    setUser(null);
+    setProfileError("");
+
+    const loadAccount = async () => {
+      try {
+        const accountUrl = resolvedArtistId
+          ? `${BACKEND_URL}/api/accounts/id/${encodeURIComponent(resolvedArtistId)}`
+          : `${BACKEND_URL}/api/accounts/${encodeURIComponent(defaultUser.username)}`;
+        const response = await fetch(accountUrl);
+        if (!response.ok) throw new Error("Failed to load account");
+        const data = await response.json();
+        setUser(data);
+      } catch (error) {
+        console.error("Load Account Error:", error);
+        setProfileError("Could not load artist profile.");
+      }
+    };
+
     const loadPosts = async () => {
       try {
         const response = await fetch(`${BACKEND_URL}/api/posts`);
@@ -143,8 +203,9 @@ const ProfilePage = () => {
       }
     };
 
+    loadAccount();
     loadPosts();
-  }, []);
+  }, [artistId, resolvedArtistId]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -206,8 +267,10 @@ const ProfilePage = () => {
         .split(/[,#]/)
         .map((t) => t.trim())
         .filter(Boolean);
+      const currentUser = user || defaultUser;
       const payload = {
-        user: user.username,
+        user: currentUser.username,
+        artistId: currentUser._id,
         likes: 0,
         comments: [],
         url: cloakedUrl,
@@ -245,16 +308,109 @@ const ProfilePage = () => {
     };
   };
 
+  const handleCreateAccount = async (e) => {
+    e.preventDefault();
+    if (!newAccountUsername.trim()) return;
+
+    setIsCreatingAccount(true);
+    setAccountError("");
+    try {
+      const payload = {
+        username: newAccountUsername.trim(),
+        bio: newAccountBio.trim() || undefined,
+        followersCount:
+          newAccountFollowers.trim() === ""
+            ? undefined
+            : Number(newAccountFollowers),
+      };
+
+      const response = await fetch(`${BACKEND_URL}/api/accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to create account: ${response.status} ${response.statusText} ${errorText}`
+        );
+      }
+
+      const created = await response.json();
+      setUser(created);
+      setNewAccountUsername("");
+      setNewAccountBio("");
+      setNewAccountFollowers("");
+    } catch (error) {
+      console.error("Create Account Error:", error);
+      setAccountError("Could not create account.");
+    } finally {
+      setIsCreatingAccount(false);
+    }
+  };
+
   return (
     <div style={styles.container}>
+      <section style={styles.accountPanel}>
+        <h3 style={styles.accountTitle}>Create Account</h3>
+        <form style={styles.accountForm} onSubmit={handleCreateAccount}>
+          <input
+            type="text"
+            placeholder="Username"
+            value={newAccountUsername}
+            onChange={(e) => setNewAccountUsername(e.target.value)}
+            style={styles.accountInput}
+            required
+          />
+          <input
+            type="text"
+            placeholder="Bio (optional)"
+            value={newAccountBio}
+            onChange={(e) => setNewAccountBio(e.target.value)}
+            style={styles.accountInput}
+          />
+          <input
+            type="number"
+            placeholder="Followers count (optional)"
+            value={newAccountFollowers}
+            onChange={(e) => setNewAccountFollowers(e.target.value)}
+            style={styles.accountInput}
+            min="0"
+          />
+          <div style={styles.accountActions}>
+            <button
+              type="submit"
+              style={styles.accountButton}
+              disabled={isCreatingAccount}
+            >
+              {isCreatingAccount ? "Creating..." : "Create"}
+            </button>
+            {accountError && (
+              <span style={styles.accountError}>{accountError}</span>
+            )}
+          </div>
+        </form>
+      </section>
       {/* HEADER */}
       <header style={styles.header}>
         <div style={styles.profilePicBox}>
-          <img src={user.profilePic} alt="profile" style={styles.profilePic} />
+          <img
+            src={(user && user.profilePic) || defaultUser.profilePic}
+            alt="profile"
+            style={styles.profilePic}
+          />
         </div>
         <div style={styles.statsContainer}>
           <div style={styles.usernameRow}>
-            <h2 style={styles.username}>{user.username}</h2>
+            <h2 style={styles.username}>
+              {resolvedArtistId && !user && !profileError
+                ? "Loading..."
+                : (user && user.username) || defaultUser.username}
+            </h2>
+            {profileError && (
+              <span style={styles.accountError}>{profileError}</span>
+            )}
             <button
               style={styles.uploadBtn}
               onClick={() => setIsNewPostOpen(true)}
@@ -272,24 +428,24 @@ const ProfilePage = () => {
           </div>
           <div style={styles.statsRow}>
             <span>
-              <strong>{posts.length}</strong> drawings
+              <strong>{visiblePosts.length}</strong> drawings
             </span>
             <span>
-              <strong>{user.followers}</strong> followers
+              <strong>{user?.followersCount ?? 0}</strong> followers
             </span>
             <span>
-              <strong>{user.following}</strong> following
+              <strong>{(user?.following || []).length}</strong> following
             </span>
           </div>
-          <p style={styles.bio}>{user.bio}</p>
+          <p style={styles.bio}>{user?.bio || defaultUser.bio}</p>
         </div>
       </header>
 
       <hr style={styles.divider} />
 
       <Post
-        posts={posts}
-        user={user}
+        posts={visiblePosts}
+        user={currentUser}
         isProtected={isProtected}
         selectedPost={selectedPost}
         setSelectedPost={setSelectedPost}
@@ -372,6 +528,43 @@ const styles = {
     padding: "40px 20px",
     fontFamily: "sans-serif",
     backgroundColor: "#fff",
+  },
+  accountPanel: {
+    border: "1px solid #dbdbdb",
+    borderRadius: "8px",
+    padding: "16px",
+    marginBottom: "24px",
+    backgroundColor: "#fafafa",
+  },
+  accountTitle: { margin: "0 0 12px", fontSize: "16px" },
+  accountForm: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: "10px",
+  },
+  accountInput: {
+    borderRadius: "6px",
+    border: "1px solid #dbdbdb",
+    padding: "10px",
+    fontFamily: "inherit",
+  },
+  accountActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  accountButton: {
+    backgroundColor: "#111",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    padding: "8px 16px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  },
+  accountError: {
+    color: "#b42318",
+    fontSize: "12px",
   },
   header: { display: "flex", marginBottom: "44px" },
   profilePicBox: { flex: 1, display: "flex", justifyContent: "center" },

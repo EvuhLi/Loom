@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { GiShirtButton } from "react-icons/gi";
 
 const drawImageToCanvas = (canvas, img, fit = "cover") => {
@@ -51,7 +52,7 @@ const drawImageToCanvas = (canvas, img, fit = "cover") => {
   ctx.drawImage(img, dx, dy, drawWidth, drawHeight);
 };
 
-const CanvasImage = ({ src, fit = "cover", style, canvasStyle }) => {
+const CanvasImage = ({ src, fit = "cover", canvasStyle }) => {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
 
@@ -155,10 +156,30 @@ const Post = ({
                 <strong>
                   {(() => {
                     const postUser = selectedPost.user;
-                    if (postUser && typeof postUser === "object") {
-                      return postUser.username || user.username;
+                    const postUsername =
+                      postUser && typeof postUser === "object"
+                        ? postUser.username
+                        : postUser;
+                    const rawArtistId =
+                      selectedPost.artistId ||
+                      (postUser && typeof postUser === "object"
+                        ? postUser._id
+                        : undefined);
+                    const postArtistId =
+                      rawArtistId && typeof rawArtistId === "object"
+                        ? rawArtistId.$oid || String(rawArtistId)
+                        : rawArtistId;
+                    const label = postUsername || user.username || postArtistId;
+
+                    if (postArtistId) {
+                      return (
+                        <Link to={`/profile/${postArtistId}`}>
+                          {label}
+                        </Link>
+                      );
                     }
-                    return postUser || user.username;
+
+                    return label;
                   })()}
                 </strong>
               </div>
