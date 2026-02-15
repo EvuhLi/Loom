@@ -2,6 +2,8 @@ require('dotenv').config(); // Loads your HF_API_TOKEN from .env
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch'); // Ensure you have node-fetch installed
+const mongoose = require('mongoose');
+const Post = require('./models/Post');
 
 const app = express();
 
@@ -10,6 +12,17 @@ app.use(cors());
 
 // Increase the limit because images sent as strings (Base64) are large
 app.use(express.json({ limit: '10mb' }));
+
+const MONGODB_URI = process.env.MONGODB_URI;
+
+if (!MONGODB_URI) {
+  console.error('Missing MONGODB_URI in environment. Add it to backend .env');
+} else {
+  mongoose
+    .connect(MONGODB_URI)
+    .then(() => console.log('MongoDB connected'))
+    .catch((err) => console.error('MongoDB connection error:', err));
+}
 
 const MODEL_URL = "https://router.huggingface.co/hf-inference/models/umm-maybe/AI-image-detector";
 
@@ -45,6 +58,39 @@ app.post('/api/check-ai', async (req, res) => {
   } catch (error) {
     console.error("Backend Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Posts
+app.get('/api/posts', async (req, res) => {
+  try {
+    const posts = await Post.find().sort({ date: -1 });
+    res.json(posts);
+  } catch (error) {
+    console.error('Get Posts Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/posts', async (req, res) => {
+  try {
+    const { user, likedPosts, comments, url, date } = req.body;
+    if (!user || !url) {
+      return res.status(400).json({ error: 'user and url are required' });
+    }
+
+    const newPost = await Post.create({
+      user,
+      likedPosts: likedPosts ?? 0,
+      comments: comments ?? [],
+      url,
+      date: date ? new Date(date) : undefined,
+    });
+
+    res.status(201).json(newPost);
+  } catch (error) {
+    console.error('Create Post Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
