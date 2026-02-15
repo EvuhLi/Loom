@@ -11,7 +11,8 @@ const app = express();
 app.use(cors());
 
 // Increase the limit because images sent as strings (Base64) are large
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -90,7 +91,7 @@ app.post('/api/posts', async (req, res) => {
     res.status(201).json(newPost);
   } catch (error) {
     console.error('Create Post Error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
 });
 

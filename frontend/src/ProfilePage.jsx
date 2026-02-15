@@ -51,6 +51,10 @@ const ProfilePage = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
   const [likedPosts, setLikedPosts] = useState({}); // Stores { postId: true/false }
+  const [isNewPostOpen, setIsNewPostOpen] = useState(false);
+  const [newDescription, setNewDescription] = useState("");
+  const [newTags, setNewTags] = useState("");
+  const [newImageFile, setNewImageFile] = useState(null);
 
   const toggleButton = async (postId) => {
     const wasLiked = !!likedPosts[postId];
@@ -171,9 +175,14 @@ const ProfilePage = () => {
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setNewImageFile(file);
+  };
+
+  const handleCreatePost = async () => {
+    if (!newImageFile) return;
 
     setIsScanning(true);
-    const isAI = await checkIsAI(file);
+    const isAI = await checkIsAI(newImageFile);
 
     if (isAI) {
       alert("BLOCKED: AI Generation detected.");
@@ -182,7 +191,7 @@ const ProfilePage = () => {
     }
 
     const img = new Image();
-    img.src = URL.createObjectURL(file);
+    img.src = URL.createObjectURL(newImageFile);
     img.onload = async () => {
       const canvas = document.createElement("canvas");
       canvas.width = img.width;
@@ -193,11 +202,17 @@ const ProfilePage = () => {
       applyCloak(ctx, img.width, img.height); // Apply invisible protection
 
       const cloakedUrl = canvas.toDataURL("image/jpeg", 0.9);
+      const tagsArray = newTags
+        .split(/[,#]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
       const payload = {
         user: user.username,
         likes: 0,
         comments: [],
         url: cloakedUrl,
+        description: newDescription.trim() || undefined,
+        tags: tagsArray,
         date: new Date().toISOString(),
       };
 
@@ -208,9 +223,19 @@ const ProfilePage = () => {
           body: JSON.stringify(payload),
         });
 
-        if (!response.ok) throw new Error("Failed to save post");
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Failed to save post: ${response.status} ${response.statusText} ${errorText}`
+          );
+        }
         const savedPost = await response.json();
         setPosts((prev) => [savedPost, ...prev]);
+        setIsNewPostOpen(false);
+        setNewDescription("");
+        setNewTags("");
+        setNewImageFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
       } catch (error) {
         console.error("Save Post Error:", error);
       } finally {
@@ -231,10 +256,10 @@ const ProfilePage = () => {
             <h2 style={styles.username}>{user.username}</h2>
             <button
               style={styles.uploadBtn}
-              onClick={() => fileInputRef.current.click()}
+              onClick={() => setIsNewPostOpen(true)}
               disabled={isScanning}
             >
-              {isScanning ? "Scanning..." : "New Post"}
+              {"New Post"}
             </button>
             <input
               type="file"
@@ -270,6 +295,59 @@ const ProfilePage = () => {
         likedPosts={likedPosts}
         toggleButton={toggleButton}
       />
+
+      {isNewPostOpen && (
+        <div style={styles.newPostOverlay} onClick={() => setIsNewPostOpen(false)}>
+          <div style={styles.newPostModal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.newPostHeader}>
+              <h3 style={styles.newPostTitle}>Create new post</h3>
+              <button
+                style={styles.newPostClose}
+                onClick={() => setIsNewPostOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={styles.newPostBody}>
+              <label style={styles.newPostLabel}>Description</label>
+              <textarea
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                style={styles.newPostTextarea}
+                placeholder="Write something about your art..."
+                rows={4}
+              />
+
+              <label style={styles.newPostLabel}>Tags</label>
+              <input
+                type="text"
+                value={newTags}
+                onChange={(e) => setNewTags(e.target.value)}
+                style={styles.newPostInput}
+                placeholder="e.g. watercolor, nature, landscape"
+              />
+
+              <label style={styles.newPostLabel}>Image</label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*"
+                style={styles.newPostFile}
+              />
+            </div>
+            <div style={styles.newPostFooter}>
+              <button
+                style={styles.newPostPrimary}
+                onClick={handleCreatePost}
+                disabled={isScanning || !newImageFile}
+              >
+                {isScanning ? "Scanning..." : "Post"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -316,6 +394,78 @@ const styles = {
     border: "0",
     borderTop: "1px solid #dbdbdb",
     marginBottom: "20px",
+  },
+  newPostOverlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1200,
+  },
+  newPostModal: {
+    width: "90%",
+    maxWidth: "520px",
+    backgroundColor: "#fff",
+    borderRadius: "8px",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+    overflow: "hidden",
+  },
+  newPostHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "16px",
+    borderBottom: "1px solid #efefef",
+  },
+  newPostTitle: { margin: 0, fontSize: "18px" },
+  newPostClose: {
+    background: "none",
+    border: "none",
+    fontSize: "18px",
+    cursor: "pointer",
+  },
+  newPostBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+    padding: "16px",
+  },
+  newPostLabel: { fontSize: "13px", fontWeight: "600", color: "#555" },
+  newPostTextarea: {
+    resize: "vertical",
+    borderRadius: "6px",
+    border: "1px solid #dbdbdb",
+    padding: "10px",
+    fontFamily: "inherit",
+  },
+  newPostInput: {
+    borderRadius: "6px",
+    border: "1px solid #dbdbdb",
+    padding: "10px",
+    fontFamily: "inherit",
+  },
+  newPostFile: {
+    padding: "6px 0",
+  },
+  newPostFooter: {
+    padding: "16px",
+    borderTop: "1px solid #efefef",
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+  newPostPrimary: {
+    backgroundColor: "#0095f6",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    padding: "8px 16px",
+    fontWeight: "bold",
+    cursor: "pointer",
   },
 };
 

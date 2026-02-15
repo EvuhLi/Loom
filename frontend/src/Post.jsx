@@ -60,8 +60,34 @@ const Post = ({
 
             <div style={styles.modalInfoSide}>
               <div style={styles.modalHeader}>
-                <strong>{user.username}</strong>
+                <strong>
+                  {(() => {
+                    const postUser = selectedPost.user;
+                    if (postUser && typeof postUser === "object") {
+                      return postUser.username || user.username;
+                    }
+                    return postUser || user.username;
+                  })()}
+                </strong>
               </div>
+              {(selectedPost.description || (selectedPost.tags || []).length > 0) && (
+                <div style={styles.modalMeta}>
+                  {selectedPost.description && (
+                    <div style={styles.description}>
+                      {selectedPost.description}
+                    </div>
+                  )}
+                  {(selectedPost.tags || []).length > 0 && (
+                    <div style={styles.tags}>
+                      {(selectedPost.tags || []).map((tag, index) => (
+                        <span key={`${tag}-${index}`} style={styles.tag}>
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={styles.modalActions}>
                 <div
                   style={{
@@ -112,8 +138,11 @@ const Post = ({
                 </div>
               </div>
               <div style={styles.commentList}>
-                {(selectedPost.comments || []).map((c) => (
-                  <div key={c.id} style={styles.commentItem}>
+                {(selectedPost.comments || []).map((c, index) => (
+                  <div
+                    key={c._id || c.createdAt || `${c.user || "comment"}-${index}`}
+                    style={styles.commentItem}
+                  >
                     <strong>{c.user}</strong> {c.text}
                   </div>
                 ))}
@@ -209,6 +238,16 @@ const styles = {
   },
   modalInfoSide: { flex: 1, display: "flex", flexDirection: "column" },
   modalHeader: { padding: "15px", borderBottom: "1px solid #efefef" },
+  modalMeta: {
+    padding: "12px 15px",
+    borderBottom: "1px solid #efefef",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+  description: { fontSize: "14px", color: "#262626" },
+  tags: { display: "flex", flexWrap: "wrap", gap: "8px" },
+  tag: { fontSize: "13px", color: "#00376b" },
   commentList: { flex: 1, padding: "15px", overflowY: "auto" },
   commentItem: { marginBottom: "10px", fontSize: "14px" },
   modalActions: { padding: "15px", borderTop: "1px solid #efefef" },
