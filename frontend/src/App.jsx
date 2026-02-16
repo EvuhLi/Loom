@@ -90,23 +90,12 @@ function App() {
         </div>
       </nav>
 
-<<<<<<< HEAD
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/profile/:artistId" element={<ProfilePage />} />
       </Routes>
-=======
-      {/* push page content below the fixed navbar */}
-      <div style={{ paddingTop: `${NAV_HEIGHT}px` }}>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-        </Routes>
-      </div>
->>>>>>> 29138ad (update landing/login UI)
     </BrowserRouter>
   );
 }

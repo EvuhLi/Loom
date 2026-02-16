@@ -1,10 +1,13 @@
+
 require('dotenv').config(); // Loads your HF_API_TOKEN from .env
+const secretKey = process.env.RECAPTCHA_SECRET_KEY; 
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch'); // Ensure you have node-fetch installed
 const mongoose = require('mongoose');
 const Post = require('./models/Post');
 const Account = require('./models/Account');
+const router = express.Router(); 
 
 const app = express();
 
@@ -268,3 +271,34 @@ app.patch('/api/posts/:id/like', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Backend secure bridge running on port ${PORT}`));
+
+
+router.post('/signup', async (req, res) => {
+  const { username, password, captchaToken } = req.body;
+
+  if (!captchaToken) {
+    return res.status(400).json({ message: "Captcha token is missing" });
+  }
+
+  // Verify the token with Google
+  const googleVerifyUrl = `https://www.google.com/recaptcha/api/siteverify?secret=${RECAPTCHA_SECRET_KEY}&response=${captchaToken}`;
+
+  try {
+    const response = await fetch(googleVerifyUrl, { method: 'POST' });
+    const data = await response.json();
+
+    if (data.success) {
+      // CAPTCHA is valid! 
+      // Proceed to create the user in your database here.
+      console.log("User is human");
+      res.status(200).json({ message: "Signup successful" });
+    } else {
+      // CAPTCHA failed
+      res.status(400).json({ message: "Captcha verification failed. You might be a bot." });
+    }
+  } catch (error) {
+    res.status(500).json({ message: "Server error verifying captcha" });
+  }
+});
+
+module.exports = router;
