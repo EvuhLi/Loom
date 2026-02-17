@@ -3,58 +3,59 @@ import { Link } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
 import "./App.css";
 
-export default function LoginPage() {
-  // 1. State to store what the user types
+export default function SignUpPage() {
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [captchaToken, setCaptchaToken] = useState(null);
 
   const onCaptchaChange = (token) => {
     setCaptchaToken(token);
   };
 
-  // 2. The function that runs when you click LOGIN
-  const handleLogin = async (e) => {
-    // If inside a form, prevent page refresh. If just a button, this is safe to keep.
-    if (e) e.preventDefault(); 
+  const handleSignUp = async (e) => {
+    if (e) e.preventDefault();
 
-    // A. Check if Captcha is done
     if (!captchaToken) {
       alert("Please check the box to verify you are not a robot!");
       return;
     }
 
-    // B. Check if fields are filled
-    if (!username || !password) {
-      alert("Please enter both username and password.");
+    if (!username || !email || !password || !confirmPassword) {
+      alert("Please fill in all fields.");
       return;
     }
 
-    console.log("Sending data to backend:", { username, password, captchaToken });
+    if (password !== confirmPassword) {
+      alert("Passwords do not match.");
+      return;
+    }
 
-    // C. Send data to your backend (The "Login Logic")
+    console.log("Sending data to backend:", { username, email, password, captchaToken });
+
     try {
-      // Replace '/api/login' with your actual backend URL (e.g., 'http://localhost:5000/login')
-      const response = await fetch('http://localhost:5000/login', {
+      const response = await fetch('http://localhost:5000/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: username,
-          password: password,
-          captchaToken: captchaToken, // Sending the token to be verified
+          username,
+          email,
+          password,
+          captchaToken,
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        alert("Login Successful!");
-        // Redirect user to home page here
-        // window.location.href = "/"; 
+        alert("Sign Up Successful!");
+        // Redirect to login or home
+        // window.location.href = "/login";
       } else {
-        alert("Login Failed: " + data.message);
+        alert("Sign Up Failed: " + data.message);
       }
     } catch (error) {
       console.error("Error:", error);
@@ -84,37 +85,57 @@ export default function LoginPage() {
           boxShadow: "0 18px 55px rgba(0,0,0,0.22)",
         }}
       >
-        <h2 style={{ textAlign: "center", margin: "0 0 20px" }}>Login</h2>
+        <h2 style={{ textAlign: "center", margin: "0 0 20px" }}>Sign Up</h2>
 
-        {/* USERNAME INPUT */}
         <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 6 }}>
           Username
         </label>
         <input
           placeholder="Type your username"
           style={inputStyle}
-          value={username} // Controlled input
-          onChange={(e) => setUsername(e.target.value)} // Updates state
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
         />
 
         <div style={{ height: 14 }} />
 
-        {/* PASSWORD INPUT */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <label style={{ fontSize: 12, color: "#666" }}>Password</label>
-          <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: 12, color: "#7c3aed" }}>
-            Forgot password?
-          </a>
-        </div>
+        <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 6 }}>
+          Email
+        </label>
+        <input
+          type="email"
+          placeholder="Type your email"
+          style={inputStyle}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+
+        <div style={{ height: 14 }} />
+
+        <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 6 }}>
+          Password
+        </label>
         <input
           type="password"
           placeholder="Type your password"
           style={inputStyle}
-          value={password} // Controlled input
-          onChange={(e) => setPassword(e.target.value)} // Updates state
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
 
-        {/* CAPTCHA */}
+        <div style={{ height: 14 }} />
+
+        <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 6 }}>
+          Confirm Password
+        </label>
+        <input
+          type="password"
+          placeholder="Confirm your password"
+          style={inputStyle}
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
+
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'center' }}>
           <ReCAPTCHA
             sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
@@ -122,9 +143,8 @@ export default function LoginPage() {
           />
         </div>
 
-        {/* LOGIN BUTTON */}
         <button
-          onClick={handleLogin}
+          onClick={handleSignUp}
           style={{
             width: "100%",
             marginTop: 18,
@@ -138,27 +158,17 @@ export default function LoginPage() {
             boxShadow: "0 10px 18px rgba(177, 77, 255, 0.25)",
           }}
         >
-          LOGIN
+          SIGN UP
         </button>
 
         <div style={{ textAlign: "center", marginTop: 18, color: "#777", fontSize: 12 }}>
-          Don't have an account?
+          Already have an account?
         </div>
 
         <div style={{ textAlign: "center", marginTop: 8 }}>
-          <Link to="/signup" style={{ color: "#111", fontWeight: 700, textDecoration: "none" }}>
-            SIGN UP
+          <Link to="/login" style={{ color: "#111", fontWeight: 700, textDecoration: "none" }}>
+            LOGIN
           </Link>
-        </div>
-
-        <div style={{ textAlign: "center", marginTop: 18, color: "#777", fontSize: 12 }}>
-          Or Sign Up Using
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 10 }}>
-          <SocialCircle label="f" />
-          <SocialCircle label="🐦" />
-          <SocialCircle label="G" />
         </div>
 
         <div style={{ textAlign: "center", marginTop: 22, color: "#777", fontSize: 12 }}>
@@ -183,26 +193,3 @@ const inputStyle = {
   outline: "none",
   fontSize: 14,
 };
-
-function SocialCircle({ label }) {
-  return (
-    <button
-      onClick={(e) => e.preventDefault()}
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: "999px",
-        border: "1px solid rgba(0,0,0,0.12)",
-        background: "white",
-        cursor: "pointer",
-        display: "grid",
-        placeItems: "center",
-        fontWeight: 800,
-      }}
-      aria-label={`Continue with ${label}`}
-      title={`Continue with ${label}`}
-    >
-      {label}
-    </button>
-  );
-}

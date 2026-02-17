@@ -4,6 +4,7 @@ import "./App.css";
 
 import LandingPage from "./LandingPage";
 import LoginPage from "./LoginPage";
+import SignUpPage from "./SignUpPage";
 import ProfilePage from "./ProfilePage";
 
 const GRADIENT = "linear-gradient(90deg, #3dd5f3, #b14dff)";
@@ -93,6 +94,7 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignUpPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/profile/:artistId" element={<ProfilePage />} />
       </Routes>
