@@ -10,12 +10,13 @@ const INITIAL_VISIBLE_NODES = 28;
 const FETCH_LIMIT = 80;
 const LOAD_MORE_STEP = 16;
 const CATEGORY_THRESHOLDS = {
-  medium: 0.2,
-  subject: 0.2,
-  style: 0.2,
-  mood: 0.2,
-  color_palette: 0.2,
-  aesthetic_features: 0.2,
+  medium: 0.12,
+  subject: 0.1,
+  style: 0.1,
+  mood: 0.12,
+  color_palette: 0.12,
+  aesthetic_features: 0.12,
+  manual: 0.08,
 };
 const LINK_COLORS = {
   medium: "#6B705C",
@@ -24,6 +25,8 @@ const LINK_COLORS = {
   mood: "#B08968",
   color_palette: "#7F5539",
   aesthetic_features: "#84A98C",
+  manual: "#52796F",
+  tag_overlap: "#2F3E46",
   follower: "#B56576",
 };
 
@@ -43,6 +46,8 @@ const NetworkFYP = ({ username }) => {
     mood: true,
     color_palette: true,
     aesthetic_features: true,
+    manual: true,
+    tag_overlap: true,
     follower: true,
   });
   
@@ -142,16 +147,36 @@ const NetworkFYP = ({ username }) => {
 
     const labelsFor = (post, category) => {
       const labels = new Set();
+      const pushTokens = (value) => {
+        const raw = String(value || "").trim().toLowerCase();
+        if (!raw) return;
+        labels.add(raw);
+        raw
+          .split(/[\s/_-]+/)
+          .map((t) => t.trim())
+          .filter((t) => t.length >= 3)
+          .forEach((t) => labels.add(t));
+      };
       if (category === "medium") {
         const mediumLabel = String(post?.medium || "").trim().toLowerCase();
-        if (mediumLabel) labels.add(mediumLabel);
+        if (mediumLabel) pushTokens(mediumLabel);
+      }
+      if (category === "manual" && Array.isArray(post?.tags)) {
+        post.tags.forEach((tag) => pushTokens(tag));
       }
       if (post?.mlTags && Array.isArray(post.mlTags[category])) {
         post.mlTags[category].forEach((tag) => {
-          const label = String(tag?.label || "").trim().toLowerCase();
-          if (label) labels.add(label);
+          pushTokens(tag?.label);
         });
       }
+      return labels;
+    };
+
+    const overallLabelsFor = (post) => {
+      const labels = new Set();
+      Object.keys(CATEGORY_THRESHOLDS).forEach((category) => {
+        labelsFor(post, category).forEach((label) => labels.add(label));
+      });
       return labels;
     };
 
@@ -159,11 +184,15 @@ const NetworkFYP = ({ username }) => {
     Object.keys(CATEGORY_THRESHOLDS).forEach((category) => {
       perCategoryLabels[category] = nodes.map((n) => labelsFor(n.post, category));
     });
+    const overallLabels = nodes.map((n) => overallLabelsFor(n.post));
 
     const built = [];
+    const tagDegree = new Array(nodes.length).fill(0);
+    const bestTagCandidate = new Array(nodes.length).fill(null);
 
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
+        let hasTagLink = false;
         Object.entries(CATEGORY_THRESHOLDS).forEach(([category, threshold]) => {
           const score = similarity(
             perCategoryLabels[category][i],
@@ -176,8 +205,21 @@ const NetworkFYP = ({ username }) => {
               strength: score,
               type: category,
             });
+            hasTagLink = true;
           }
         });
+        if (hasTagLink) {
+          tagDegree[i] += 1;
+          tagDegree[j] += 1;
+        }
+
+        const overallScore = similarity(overallLabels[i], overallLabels[j]);
+        if (!bestTagCandidate[i] || overallScore > bestTagCandidate[i].score) {
+          bestTagCandidate[i] = { j, score: overallScore };
+        }
+        if (!bestTagCandidate[j] || overallScore > bestTagCandidate[j].score) {
+          bestTagCandidate[j] = { j: i, score: overallScore };
+        }
 
         const aArtistId = String(nodes[i]?.post?.artistId || "");
         const bArtistId = String(nodes[j]?.post?.artistId || "");
@@ -191,11 +233,42 @@ const NetworkFYP = ({ username }) => {
           built.push({
             source: nodes[i],
             target: nodes[j],
-            strength: 1,
+            strength: 0.75,
             type: "follower",
           });
         }
       }
+    }
+
+    // Guarantee at least one tag-based connection for each node (if possible).
+    const seenPairs = new Set(
+      built
+        .filter((l) => l.type !== "follower")
+        .map((l) => {
+          const a = String(l.source?.id || "");
+          const b = String(l.target?.id || "");
+          return a < b ? `${a}|${b}` : `${b}|${a}`;
+        })
+    );
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes.length < 2) break;
+      if (tagDegree[i] > 0) continue;
+      const candidate = bestTagCandidate[i];
+      if (!candidate || candidate.score <= 0) continue;
+      const j = candidate.j;
+      const a = String(nodes[i]?.id || "");
+      const b = String(nodes[j]?.id || "");
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (seenPairs.has(key)) continue;
+      built.push({
+        source: nodes[i],
+        target: nodes[j],
+        strength: Math.max(0.08, candidate.score),
+        type: "tag_overlap",
+      });
+      seenPairs.add(key);
+      tagDegree[i] += 1;
+      tagDegree[j] += 1;
     }
 
     return built;

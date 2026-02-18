@@ -299,7 +299,12 @@ SUBJECT_KEYWORD_HINTS = {
     "abstract": ["abstract art", "geometric abstract"],
 }
 
-MIN_TOTAL_TAGS = 3
+MIN_TOTAL_TAGS = 6
+MIN_CATEGORY_TAGS = {
+    "subject": 2,
+    "style": 1,
+    "medium": 1,
+}
 
 # -------- HELPERS -------- #
 
@@ -496,6 +501,30 @@ async def analyze(image: UploadFile = File(...)):
 
             # Sort by confidence descending — all above threshold are returned
             category_tags.sort(key=lambda x: x["confidence"], reverse=True)
+
+            min_for_category = MIN_CATEGORY_TAGS.get(category, 0)
+            if min_for_category > 0 and len(category_tags) < min_for_category:
+                existing = {t.get("label", "").strip().lower() for t in category_tags}
+                ranked = sorted(
+                    [
+                        {
+                            "label": labels[i],
+                            "confidence": round(min(float(scores[i].item()), 1.0), 3),
+                        }
+                        for i in range(len(labels))
+                    ],
+                    key=lambda x: x["confidence"],
+                    reverse=True,
+                )
+                for item in ranked:
+                    key = item["label"].strip().lower()
+                    if not key or key in existing:
+                        continue
+                    category_tags.append(item)
+                    existing.add(key)
+                    if len(category_tags) >= min_for_category:
+                        break
+
             results[category] = category_tags
 
         # Add GPT subject phrases as low-confidence supplemental tags.

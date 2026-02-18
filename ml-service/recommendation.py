@@ -58,7 +58,8 @@ MIN_INTERACTIONS    = 5
 MAX_NCF_WEIGHT      = 0.65
 SERENDIPITY_RATIO   = 0.10
 TAG_DECAY_FACTOR    = 0.5
-DIVERSITY_THRESHOLD = 0.45
+DIVERSITY_THRESHOLD = 0.72
+TAG_COHESION_BOOST = 0.12
 
 INTERACTION_WEIGHTS = {
     "like":    1.0,
@@ -390,6 +391,29 @@ def assemble_feed(scored: List[dict], n: int) -> tuple:
     return feed, seen_tag_counts
 
 
+def apply_tag_cohesion_boost(posts: List[dict], boost: float = TAG_COHESION_BOOST) -> None:
+    """
+    Lightly boosts posts that share tags with other strong candidates so
+    network views have richer tag-linked structure.
+    """
+    if len(posts) < 2:
+        return
+    anchors = sorted(posts, key=lambda x: x.get("score", 0), reverse=True)[: min(16, len(posts))]
+    for post in posts:
+        tags = post.get("mlTags") or {}
+        sims = [
+            tag_similarity(tags, a.get("mlTags") or {})
+            for a in anchors
+            if a is not post
+        ]
+        if not sims:
+            continue
+        cohesion = max(sims)
+        if cohesion <= 0:
+            continue
+        post["score"] = round(min(1.0, float(post.get("score", 0)) + boost * cohesion), 4)
+
+
 def pick_serendipity(posts: List[dict], feed: List[dict], n: int) -> List[dict]:
     candidates = [p for p in posts if p not in feed]
     if not candidates:
@@ -462,6 +486,7 @@ def recommend(req: RecommendRequest):
         )
         post["ncf_weight"] = _model.ncf_weight(user_id) if user_id else 0.0
 
+    apply_tag_cohesion_boost(posts)
     personalised, seen_counts = assemble_feed(posts, n_personalised)
 
     # Second pass — re-score remainder with decay
@@ -477,6 +502,7 @@ def recommend(req: RecommendRequest):
             creator_behavior_stats,
         )
 
+    apply_tag_cohesion_boost(remaining, boost=TAG_COHESION_BOOST * 0.6)
     serendipity = pick_serendipity(remaining, personalised, n_serendipity)
     for post in serendipity:
         post["is_serendipity"] = True
