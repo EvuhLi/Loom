@@ -22,6 +22,8 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI;
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://127.0.0.1:8001";
+const HF_API_TOKEN = process.env.HF_API_TOKEN;
+const HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/umm-maybe/AI-image-detector";
 
 // =============================
 // DATABASE
@@ -36,6 +38,48 @@ mongoose
   .connect(MONGODB_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("MongoDB connection error:", err));
+
+// =============================
+// AI DETECTION PROXY
+// =============================
+
+app.post("/api/check-ai", async (req, res) => {
+  try {
+    const { imageData } = req.body;
+    if (!imageData)
+      return res.status(400).json({ error: "No image data provided" });
+
+    if (!HF_API_TOKEN) {
+      return res.status(503).json({ error: "HF_API_TOKEN not configured" });
+    }
+
+    const imageBuffer = Buffer.from(imageData, "base64");
+    console.log("🔍 Checking AI with Hugging Face...");
+
+    const hfResponse = await nodeFetch(HF_MODEL_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${HF_API_TOKEN}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: imageBuffer,
+      timeout: 30000,
+    });
+
+    if (!hfResponse.ok) {
+      const errorText = await hfResponse.text();
+      console.error(`HF API error ${hfResponse.status}:`, errorText);
+      return res.status(502).json({ error: "HF API failed", detail: errorText });
+    }
+
+    const result = await hfResponse.json();
+    console.log("✅ AI check complete");
+    res.json(result);
+  } catch (err) {
+    console.error("AI check error:", err.message);
+    res.status(500).json({ error: "Internal Server Error", detail: err.message });
+  }
+});
 
 // =============================
 // ML TAGGING PROXY
@@ -76,6 +120,31 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 // =============================
+// GET ACCOUNT BY ID
+// =============================
+
+app.get("/api/accounts/id/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid account ID" });
+    }
+
+    const account = await Account.findById(id);
+
+    if (!account) {
+      return res.status(404).json({ error: "Account not found" });
+    }
+
+    res.json(account);
+  } catch (err) {
+    console.error("Get Account By ID Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// =============================
 // FYP RECOMMENDATIONS
 // =============================
 
@@ -84,12 +153,11 @@ app.get("/api/fyp", async (req, res) => {
     const { username } = req.query;
     const limit = parseInt(req.query.limit) || 20;
 
-    // Filter: 1. Not the user's own post. 2. User is not in the likedBy array.
     let query = {};
     if (username && username !== "undefined" && username !== "null") {
       query = {
-        user: { $ne: username },        // Don't show my own posts
-        likedBy: { $ne: username }     // Don't show posts I've already liked
+        user: { $ne: username },
+        likedBy: { $ne: username }
       };
     }
 
@@ -106,8 +174,7 @@ app.get("/api/fyp", async (req, res) => {
       mlTags: p.mlTags || {},
     }));
 
-    // Send the filtered list to the ML service for ranking
-    const pyResponse = await nodeFetch(`${ML_SERVICE_URL}/recommendation/recommend`, {
+    const pyResponse = await nodeFetch(`${ML_SERVICE_URL}/recommend/feed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -144,8 +211,7 @@ app.post("/api/interaction", async (req, res) => {
     const allPosts = await Post.find({}, "_id").lean();
     const allPostIds = allPosts.map((p) => p._id.toString());
 
-    // Update ML Service interaction history
-    await nodeFetch(`${ML_SERVICE_URL}/recommendation/interaction`, {
+    await nodeFetch(`${ML_SERVICE_URL}/recommend/interaction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -213,7 +279,7 @@ app.post("/api/posts", async (req, res) => {
       tags: Array.isArray(tags) ? tags : [],
       mlTags: mlTags || {},
       medium,
-      likedBy: [] // Initialize empty list
+      likedBy: []
     });
 
     res.status(201).json(newPost);
@@ -230,13 +296,13 @@ app.post("/api/posts", async (req, res) => {
 app.patch("/api/posts/:id/like", async (req, res) => {
   try {
     const { id } = req.params;
-    const { username } = req.body; // Frontend must send this
+    const { username } = req.body;
 
     const updatedPost = await Post.findByIdAndUpdate(
       id,
       { 
         $inc: { likes: 1 },
-        $addToSet: { likedBy: username } // Prevents duplicates automatically
+        $addToSet: { likedBy: username }
       },
       { new: true }
     );
@@ -268,6 +334,39 @@ app.get("/api/accounts/:username", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+// =============================
+// CREATE ACCOUNT
+// =============================
+
+app.post("/api/accounts", async (req, res) => {
+  try {
+    const { username, bio, followersCount } = req.body;
+
+    if (!username || !username.trim()) {
+      return res.status(400).json({ error: "Username required" });
+    }
+
+    // Check if username already exists
+    const existing = await Account.findOne({ username: username.trim() });
+    if (existing) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+
+    const newAccount = await Account.create({
+      username: username.trim(),
+      bio: bio || "",
+      followersCount: followersCount || 0,
+      following: [],
+    });
+
+    res.status(201).json(newAccount);
+  } catch (err) {
+    console.error("Create Account Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 
 // =============================
 // START SERVER
