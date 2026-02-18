@@ -221,6 +221,20 @@ const Post = ({
   };
 
   const [commentText, setCommentText] = useState("");
+  const [slideIndex, setSlideIndex] = useState(0);
+
+  useEffect(() => {
+    setSlideIndex(0);
+  }, [selectedPost?._id, selectedPost?.id]);
+
+  const slidesFor = (post) => {
+    if (!post) return [];
+    const processSlides = Array.isArray(post.processSlides)
+      ? post.processSlides.filter((s) => typeof s === "string" && s.trim())
+      : [];
+    const cover = post.url ? [post.url] : [];
+    return [...cover, ...processSlides];
+  };
 
   const handleCommentSubmit = async (e) => {
     e.preventDefault();
@@ -272,12 +286,18 @@ const Post = ({
       {selectedPost && (
         <div style={styles.modalOverlay} onClick={() => setSelectedPost(null)}>
           <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            {(() => {
+              const slides = slidesFor(selectedPost);
+              const safeIndex = Math.min(Math.max(slideIndex, 0), Math.max(slides.length - 1, 0));
+              const currentSlide = slides[safeIndex] || selectedPost.url;
+              return (
+                <>
 
             {/* IMAGE SIDE */}
             <div style={styles.modalImageSide}>
               <div style={styles.modalCanvasWrap}>
                 <CanvasImage
-                  src={selectedPost.url}
+                  src={currentSlide}
                   fit="contain"
                   canvasStyle={{
                     ...styles.modalImg,
@@ -285,6 +305,29 @@ const Post = ({
                   }}
                 />
               </div>
+              {slides.length > 1 && (
+                <>
+                  <button
+                    style={{ ...styles.slideBtn, left: "12px" }}
+                    onClick={() => setSlideIndex((prev) => Math.max(0, prev - 1))}
+                    disabled={safeIndex === 0}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    style={{ ...styles.slideBtn, right: "12px" }}
+                    onClick={() =>
+                      setSlideIndex((prev) => Math.min(slides.length - 1, prev + 1))
+                    }
+                    disabled={safeIndex === slides.length - 1}
+                  >
+                    ›
+                  </button>
+                  <div style={styles.slideCounter}>
+                    Slide {safeIndex + 1} / {slides.length}
+                  </div>
+                </>
+              )}
               <div onContextMenu={(e) => e.preventDefault()} style={styles.ghostLayer} />
             </div>
 
@@ -406,7 +449,10 @@ const Post = ({
                 <button type="submit" style={styles.postBtn}>Post</button>
               </form>
             </div>
-          </div>
+                </>
+              );
+            })()}
+        </div>
         </div>
       )}
     </>
@@ -469,6 +515,33 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+  },
+  slideBtn: {
+    position: "absolute",
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: "34px",
+    height: "34px",
+    borderRadius: "999px",
+    border: "none",
+    backgroundColor: "rgba(255,255,255,0.85)",
+    color: "#222",
+    fontSize: "24px",
+    lineHeight: 1,
+    cursor: "pointer",
+    zIndex: 20,
+  },
+  slideCounter: {
+    position: "absolute",
+    bottom: "12px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "rgba(0,0,0,0.6)",
+    color: "#fff",
+    fontSize: "12px",
+    borderRadius: "999px",
+    padding: "4px 10px",
+    zIndex: 20,
   },
   modalCanvasWrap: {
     width: "100%", height: "100%",
