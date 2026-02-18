@@ -72,8 +72,6 @@ const mergeManualTags = (mlTagsRaw, userTagsArray) => {
     .filter((label) => !existingLabels.has(label.toLowerCase()))
     .map((label) => ({ label, confidence: 0.75 }));
   return { ...base, manual: manualTags };
-
-  return { ...base, manual: manualTags };
 };
 
 // ==========================================
@@ -82,6 +80,10 @@ const mergeManualTags = (mlTagsRaw, userTagsArray) => {
 const ProfilePage = () => {
   const { artistId } = useParams();
   const resolvedArtistId = (artistId || "").match(/[a-f0-9]{24}/i)?.[0];
+  const storedUsername =
+    typeof window !== "undefined"
+      ? (localStorage.getItem("username") || "").trim().toLowerCase()
+      : "";
   const storedAccountId =
     typeof window !== "undefined"
       ? (localStorage.getItem("accountId") || "").match(/[a-f0-9]{24}/i)?.[0]
@@ -118,12 +120,14 @@ const ProfilePage = () => {
   const [newAccountFollowers, setNewAccountFollowers] = useState("");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [isTogglingFollow, setIsTogglingFollow] = useState(false);
   const [user, setUser] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [posts, setPosts] = useState([]);
 
   const defaultUser = {
-    username: "Loom_Artist_01",
+    username: storedUsername || "loom_artist_01",
     profilePic: "/assets/handprint-primitive-man-cave-black-600nw-2503552171.png",
     bio: "",
     followersCount: 0,
@@ -205,41 +209,44 @@ const ProfilePage = () => {
     return String(value);
   };
 
-  const currentUserId = normalizeId(currentUser?._id);
-
   const visiblePosts = posts.filter((post) => {
     const postArtistId = normalizeId(
       post.artistId || (typeof post.user === "object" ? post.user._id : undefined)
     );
-    const postUsername = typeof post.user === "object" ? post.user.username : post.user;
-    if (resolvedArtistId) return String(postArtistId) === String(resolvedArtistId);
+    const postUsername = String(
+      typeof post.user === "object" ? post.user.username : post.user || ""
+    ).toLowerCase();
+    
+    if (resolvedArtistId) {
+      const match = String(postArtistId) === String(resolvedArtistId);
+      if (!match && post.title) {
+        console.warn(`Post "${post.title}" filtered - postArtistId:`, postArtistId, "vs resolvedArtistId:", resolvedArtistId);
+      }
+      return match;
+    }
+    
     const profileOwnerId = normalizeId(profileOwner?._id);
-    if (profileOwnerId && postArtistId) return String(postArtistId) === String(profileOwnerId);
-    if (profileOwner?.username) return postUsername === profileOwner.username;
+    if (profileOwnerId && postArtistId) {
+      const match = String(postArtistId) === String(profileOwnerId);
+      if (!match && post.title) {
+        console.warn(`Post "${post.title}" filtered - postArtistId:`, postArtistId, "vs profileOwnerId:", profileOwnerId);
+      }
+      return match;
+    }
+    
+    if (profileOwner?.username) {
+      const profileOwnerUsername = String(profileOwner.username).toLowerCase();
+      const match = postUsername === profileOwnerUsername;
+      if (!match && post.title) {
+        console.warn(`Post "${post.title}" filtered - postUsername:`, postUsername, "vs profileOwner.username:", profileOwnerUsername);
+      }
+      return match;
+    }
+    
     return true;
   });
-
-  const toggleButton = async (postId) => {
-    const wasLiked = !!likedPosts[postId];
-    const delta = wasLiked ? -1 : 1;
-    setLikedPosts((prev) => ({ ...prev, [postId]: !prev[postId] }));
-    setPosts((prev) =>
-      prev.map((post) =>
-        (post._id || post.id) === postId
-          ? { ...post, likes: (post.likes ?? 0) + delta }
-          : post
-      )
-    );
-    try {
-      await fetch(`${BACKEND_URL}/api/posts/${postId}/like`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delta }),
-      });
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  
+  console.log("Total posts:", posts.length, "Visible posts:", visiblePosts.length);
 
   useEffect(() => {
     setUser(null);
@@ -247,12 +254,29 @@ const ProfilePage = () => {
 
     const loadAccount = async () => {
       try {
+        // Load the profile owner (the artist being viewed)
         const accountUrl = activeArtistId
           ? `${BACKEND_URL}/api/accounts/id/${encodeURIComponent(activeArtistId)}`
           : `${BACKEND_URL}/api/accounts/${encodeURIComponent(defaultUser.username)}`;
         const res = await fetch(accountUrl);
         if (res.ok) setUser(await res.json());
         else setProfileError("Could not load artist profile.");
+
+        // Also load and set the default viewer (current user) if not already set
+        if (!viewer) {
+          try {
+            const viewerRes = await fetch(
+              `${BACKEND_URL}/api/accounts/${encodeURIComponent(defaultUser.username)}`
+            );
+            if (viewerRes.ok) {
+              const viewerAccount = await viewerRes.json();
+              setViewer(viewerAccount);
+              console.log("Loaded default viewer account:", viewerAccount);
+            }
+          } catch (err) {
+            console.warn("Could not load default viewer account:", err);
+          }
+        }
       } catch (e) {
         console.error(e);
         setProfileError("Could not load artist profile.");
@@ -261,14 +285,21 @@ const ProfilePage = () => {
 
     const loadPosts = async () => {
       try {
+        console.log("Loading posts from", `${BACKEND_URL}/api/posts`);
         const res = await fetch(`${BACKEND_URL}/api/posts`);
-        if (res.ok) setPosts(await res.json());
+        console.log("Posts fetch response status:", res.status);
+        if (res.ok) {
+          const postsData = await res.json();
+          console.log("Fetched posts from backend:", postsData);
+          setPosts(postsData);
+        } else {
+          console.error("Failed to fetch posts:", res.status, res.statusText);
+        }
       } catch (e) {
-        console.error(e);
+        console.error("Posts fetch error:", e);
       }
     };
 
-    loadAccount();
     loadAccount();
     loadPosts();
   }, [artistId, resolvedArtistId, activeArtistId]);
@@ -289,6 +320,11 @@ const ProfilePage = () => {
       window.removeEventListener("keyup", handleKeyUp);
     };
   }, []);
+
+  useEffect(() => {
+    console.log("Viewer updated:", viewer);
+    console.log("CurrentUser would be:", viewer || defaultUser);
+  }, [viewer]);
 
   // --- HANDLERS FOR POSTS ---
   const handleFileChange = (e) => {
@@ -318,7 +354,14 @@ const ProfilePage = () => {
   };
 
   const handleCreatePost = async () => {
+    if (!isOwnProfile) {
+      alert("You can only create posts on your own profile.");
+      return;
+    }
     if (!newImageFile) return;
+    const normalizedCurrentUsername = String(
+      currentUser?.username || defaultUser.username
+    ).toLowerCase();
     setIsScanning(true);
     setScanStatus("Checking for AI generation...");
     
@@ -326,60 +369,92 @@ const ProfilePage = () => {
     if (isAI) {
       alert("BLOCKED: AI Generation detected.");
       setIsScanning(false);
+      setScanStatus("");
       return;
     }
 
     setScanStatus("Applying protection layer...");
     const img = new Image();
     img.src = URL.createObjectURL(newImageFile);
+    
+    img.onerror = () => {
+      console.error("Image failed to load");
+      setIsScanning(false);
+      setScanStatus("");
+      alert("Failed to process image. Please try again.");
+    };
+    
     img.onload = async () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
-      applyCloak(ctx, img.width, img.height);
-
-      setScanStatus("Analyzing artwork...");
-      const mlTagsRaw = await analyzeImageTags(canvas);
-      const userTagsArray = newTags
-        .split(/[,#]/)
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const mergedMlTags = mergeManualTags(mlTagsRaw, userTagsArray);
-      const flatTags = [
-        ...new Set([
-          ...userTagsArray,
-          ...Object.values(mergedMlTags)
-            .flat()
-            .map((t) => t.label),
-        ]),
-      ];
-
-      setScanStatus("Saving post...");
-      const cloakedUrl = canvas.toDataURL("image/jpeg", 0.9);
-      const payload = {
-        user: currentUser.username.toLowerCase(),
-        artistId: currentUser._id,
-        likes: 0,
-        comments: [],
-        url: cloakedUrl,
-        title: newTitle.trim(),
-        description: newDescription.trim(),
-        tags: flatTags,
-        mlTags: mergedMlTags,
-        date: new Date().toISOString(),
-      };
-
       try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        applyCloak(ctx, img.width, img.height);
+
+        setScanStatus("Analyzing artwork...");
+        const mlTagsRaw = await analyzeImageTags(canvas);
+        if (!mlTagsRaw) {
+          console.warn("ML tagging failed, continuing without ML tags");
+        }
+        const userTagsArray = newTags
+          .split(/[,#]/)
+          .map((t) => t.trim())
+          .filter(Boolean);
+        const mergedMlTags = mergeManualTags(mlTagsRaw, userTagsArray);
+        const flatTags = [
+          ...new Set([
+            ...userTagsArray,
+            ...Object.values(mergedMlTags)
+              .flat()
+              .map((t) => t.label),
+          ]),
+        ];
+
+        setScanStatus("Saving post...");
+        console.log("Current user before post creation:", currentUser);
+        const cloakedUrl = canvas.toDataURL("image/jpeg", 0.9);
+        const payload = {
+          user: normalizedCurrentUsername,
+          artistId: normalizeId(currentUser?._id) || undefined,
+          likes: 0,
+          comments: [],
+          url: cloakedUrl,
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+          tags: flatTags,
+          mlTags: mergedMlTags,
+          date: new Date().toISOString(),
+        };
+        
+        console.log("Payload being sent to backend:", payload);
+
         const response = await fetch(`${BACKEND_URL}/api/posts`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("Post creation failed:", errorData);
+          alert(`Failed to create post: ${errorData.message || response.statusText}`);
+          return;
+        }
+        
         const savedPost = await response.json();
+        console.log("Post created successfully:", savedPost);
+        console.log("SavedPost _id:", savedPost._id, "type:", typeof savedPost._id);
+        console.log("SavedPost artistId:", savedPost.artistId, "type:", typeof savedPost.artistId);
         const saved = { ...savedPost, _id: normalizeId(savedPost._id) };
-        setPosts((prev) => [saved, ...prev]);
+        console.log("Normalized saved post:", saved);
+        console.log("Current posts before add:", posts.length);
+        setPosts((prev) => {
+          const updated = [saved, ...prev];
+          console.log("Posts updated. New count:", updated.length);
+          return updated;
+        });
         setLikedPosts((prev) => ({ ...prev, [normalizeId(savedPost._id)]: false }));
         setIsNewPostOpen(false);
         setNewDescription("");
@@ -387,7 +462,8 @@ const ProfilePage = () => {
         setNewTitle("");
         setNewImageFile(null);
       } catch (error) {
-        console.error("Save Post Error:", error);
+        console.error("Create Post Error:", error);
+        alert("Error creating post. Check console for details.");
       } finally {
         setIsScanning(false);
         setScanStatus("");
@@ -399,12 +475,6 @@ const ProfilePage = () => {
     e.preventDefault();
     setIsCreatingAccount(true);
     try {
-      const payload = {
-        username: newAccountUsername.trim(),
-        bio: newAccountBio.trim(),
-        followersCount: Number(newAccountFollowers) || 0,
-      };
-      const res = await fetch(`${BACKEND_URL}/api/accounts`, {
       const response = await fetch(`${BACKEND_URL}/api/accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -418,39 +488,53 @@ const ProfilePage = () => {
       setUser(created);
       setViewer(created);
     } catch (err) {
+      console.error("Create account failed:", err);
       setAccountError("Failed to create account.");
     } finally {
       setIsCreatingAccount(false);
     }
   };
 
-  const isOwnProfile = currentUser?.username && profileOwner?.username && (currentUser.username === profileOwner.username);
+  const currentUserId = normalizeId(currentUser?._id);
+  const profileOwnerId = normalizeId(profileOwner?._id);
+  const currentUsername = String(currentUser?.username || "").toLowerCase();
+  const profileOwnerUsername = String(profileOwner?.username || "").toLowerCase();
 
-  const isFollowingProfile = () => {
-    try {
-      const following = currentUser?.following || [];
-      const targetId = normalizeId(profileOwner?._id);
-      return following.map(String).includes(String(targetId));
-    } catch (e) {
-      return false;
-    }
-  };
+  const isOwnProfile = resolvedArtistId
+    ? Boolean(currentUserId && String(currentUserId) === String(resolvedArtistId))
+    : Boolean(
+        (currentUserId && profileOwnerId && String(currentUserId) === String(profileOwnerId)) ||
+          (currentUsername && profileOwnerUsername && currentUsername === profileOwnerUsername)
+      );
 
-  const toggleFollow = async () => {
-    if (!currentUser?.username || !profileOwner?.username) return;
+  const isFollowingProfile = Boolean(
+    !isOwnProfile &&
+      profileOwnerId &&
+      Array.isArray(currentUser?.following) &&
+      currentUser.following.map((id) => String(id)).includes(String(profileOwnerId))
+  );
+
+  const handleFollowToggle = async () => {
+    if (isOwnProfile || !profileOwnerUsername || !currentUsername) return;
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/accounts/${encodeURIComponent(profileOwner.username)}/follow`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ follower: currentUser.username }),
-      });
+      setIsTogglingFollow(true);
+      const resp = await fetch(
+        `${BACKEND_URL}/api/accounts/${encodeURIComponent(profileOwnerUsername)}/follow`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ follower: currentUsername }),
+        }
+      );
       if (!resp.ok) throw new Error("Follow toggle failed");
       const result = await resp.json();
-      // update UI state: profileOwner (target) and viewer (follower)
       if (result.target) setUser(result.target);
       if (result.follower) setViewer(result.follower);
     } catch (err) {
-      console.error("Toggle follow failed:", err);
+      console.error("Follow toggle failed:", err);
+      alert("Could not update follow state.");
+    } finally {
+      setIsTogglingFollow(false);
     }
   };
 
@@ -538,6 +622,9 @@ const ProfilePage = () => {
               {isCreatingAccount ? " sketching..." : "Create Profile"}
             </button>
           </form>
+          {accountError && (
+            <p style={{ color: "#b42318", marginTop: "10px" }}>{accountError}</p>
+          )}
         </section>
       )}
 
@@ -570,13 +657,23 @@ const ProfilePage = () => {
                   ? "Loading..."
                   : (user && user.username) || defaultUser.username}
               </h2>
-              <button
-                style={styles.primaryBtn}
-                onClick={() => setIsNewPostOpen(true)}
-                disabled={isScanning}
-              >
-                + New Art
-              </button>
+              {isOwnProfile ? (
+                <button
+                  style={styles.primaryBtn}
+                  onClick={() => setIsNewPostOpen(true)}
+                  disabled={isScanning}
+                >
+                  + New Art
+                </button>
+              ) : (
+                <button
+                  style={styles.secondaryBtn}
+                  onClick={handleFollowToggle}
+                  disabled={isTogglingFollow}
+                >
+                  {isTogglingFollow ? "Updating..." : isFollowingProfile ? "Unfollow" : "Follow"}
+                </button>
+              )}
             </div>
 
             <div style={styles.statLine}>
@@ -614,7 +711,7 @@ const ProfilePage = () => {
             <span><strong>{profileOwner.followersCount}</strong> followers</span>
           </div>
           <p style={styles.bio}>{profileOwner.bio}</p>
-        </div>
+        </header>
 
         <div style={styles.galleryContainer} className="gallery-wrapper">
           {/* Post Grid */}
@@ -651,7 +748,7 @@ const ProfilePage = () => {
       {/* Upload Modal */}        </div>
       </div>
 
-      {isNewPostOpen && (
+      {isOwnProfile && isNewPostOpen && (
         <div style={styles.overlay} onClick={() => setIsNewPostOpen(false)}>
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
@@ -696,6 +793,9 @@ const ProfilePage = () => {
               {newImageFile && (
                 <p style={styles.aiNote}>✨ Loom AI will analyze styles & protect your art.</p>
               )}
+              {isScanning && scanStatus && (
+                <p style={styles.scanStatus}>{scanStatus}</p>
+              )}
             </div>
             <div style={styles.modalFooter}>
               <button
@@ -703,7 +803,7 @@ const ProfilePage = () => {
                 onClick={handleCreatePost}
                 disabled={isScanning || !newImageFile}
               >
-                {postButtonLabel()}
+                {isScanning ? "Scanning..." : "Create Post"}
               </button>
             </div>
           </div>
@@ -910,6 +1010,18 @@ const styles = {
     fontFamily: "'Lato', sans-serif",
     boxShadow: "0 4px 10px rgba(165, 165, 141, 0.4)",
   },
+  secondaryBtn: {
+    backgroundColor: "#fff",
+    color: "#6B705C",
+    border: "1px solid #A5A58D",
+    padding: "12px 24px",
+    borderRadius: "30px",
+    fontSize: "14px",
+    letterSpacing: "0.5px",
+    cursor: "pointer",
+    transition: "all 0.2s",
+    fontFamily: "'Lato', sans-serif",
+  },
   statLine: {
     display: "flex",
     gap: "30px",
@@ -1023,6 +1135,12 @@ const styles = {
     color: "#A5A58D",
     fontFamily: "'Lato', sans-serif",
     fontWeight: "bold",
+  },
+  scanStatus: {
+    fontSize: "13px",
+    color: "#6B705C",
+    fontFamily: "'Lato', sans-serif",
+    margin: 0,
   },
   modalFooter: {
     padding: "20px",
