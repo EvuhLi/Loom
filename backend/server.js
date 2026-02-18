@@ -9,6 +9,7 @@ const crypto = require("crypto");
 
 const Post = require("./models/Post");
 const Account = require("./models/Account");
+const ActivityLog = require("./models/ActivityLog");
 const { logActivityEvent } = require("./services/behaviorTracking");
 const { runBehaviorAnalysisBatch } = require("./services/behaviorAnalysis");
 
@@ -39,6 +40,56 @@ function escapeRegex(text = "") {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function createAdminSessionToken() {
+  const token = crypto.randomBytes(32).toString("hex");
+  adminSessions.set(token, Date.now() + ADMIN_SESSION_TTL_MS);
+  return token;
+}
+
+function isValidAdminSession(token = "") {
+  const expiry = adminSessions.get(token);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    adminSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function requireAdmin(req, res, next) {
+  const auth = String(req.headers.authorization || "");
+  if (!auth.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Admin authorization required" });
+  }
+  const token = auth.slice("Bearer ".length).trim();
+  if (!isValidAdminSession(token)) {
+    return res.status(403).json({ error: "Invalid or expired admin session" });
+  }
+  next();
+}
+
+async function ensureAdminAccount() {
+  const usernameRegex = new RegExp(`^${escapeRegex(ADMIN_USERNAME)}$`, "i");
+  const existing = await Account.findOne({ username: usernameRegex });
+  if (!existing) {
+    await Account.create({
+      username: ADMIN_USERNAME,
+      passwordHash: hashPassword(ADMIN_PASSWORD),
+      role: "admin",
+      bio: "Loom platform administrator",
+      profilePic: "",
+      followersCount: 0,
+      following: [],
+    });
+    console.log("Admin account seeded");
+    return;
+  }
+  if (existing.role !== "admin") {
+    existing.role = "admin";
+    await existing.save();
+  }
+}
+
 // =============================
 // ENV
 // =============================
@@ -48,6 +99,10 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://127.0.0.1:8001";
 const HF_API_TOKEN = process.env.HF_API_TOKEN;
 const HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/umm-maybe/AI-image-detector";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "loomadmin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "loomadmin";
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const adminSessions = new Map();
 
 // =============================
 // DATABASE
@@ -60,7 +115,10 @@ if (!MONGODB_URI) {
 
 mongoose
   .connect(MONGODB_URI)
-  .then(() => console.log("✅ MongoDB connected"))
+  .then(async () => {
+    console.log("MongoDB connected");
+    await ensureAdminAccount();
+  })
   .catch((err) => console.error("MongoDB connection error:", err));
 
 // =============================
@@ -529,6 +587,10 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(400).json({ error: "Username and password are required" });
     }
 
+    if (String(usernameRaw).toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      return res.status(403).json({ error: "This username is reserved" });
+    }
+
     if (password.length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
@@ -580,6 +642,24 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(400).json({ error: "Username and password are required" });
     }
 
+    const normalizedUsername = usernameRaw.toLowerCase();
+    if (normalizedUsername === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
+      const adminAccount = await Account.findOne({
+        username: new RegExp(`^${escapeRegex(ADMIN_USERNAME)}$`, "i"),
+      }).lean();
+      const adminToken = createAdminSessionToken();
+      return res.json({
+        message: "Admin login successful",
+        user: {
+          id: adminAccount?._id || "admin",
+          username: ADMIN_USERNAME,
+          role: "admin",
+          email: adminAccount?.email || null,
+          adminToken,
+        },
+      });
+    }
+
     const usernameRegex = new RegExp(`^${escapeRegex(usernameRaw)}$`, "i");
 
     const account = await Account.findOne({
@@ -604,6 +684,7 @@ app.post("/api/auth/login", async (req, res) => {
         id: account._id,
         username: account.username,
         email: account.email || null,
+        role: account.role || "user",
       },
     });
   } catch (err) {
@@ -841,6 +922,186 @@ app.post("/api/accounts", async (req, res) => {
   }
 });
 
+// =============================
+// ADMIN PORTAL
+// =============================
+
+app.get("/api/admin/accounts", requireAdmin, async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 25));
+
+    const query = {};
+    if (search) {
+      query.username = new RegExp(escapeRegex(search), "i");
+    }
+
+    const total = await Account.countDocuments(query);
+    const accounts = await Account.find(
+      query,
+      "_id username bio followersCount following botScore behaviorFeatures lastBehaviorComputedAt createdAt"
+    )
+      .sort({ username: 1 })
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean();
+
+    const accountIds = accounts.map((a) => a._id);
+
+    const postStats = await Post.aggregate([
+      { $match: { artistId: { $in: accountIds } } },
+      {
+        $project: {
+          artistId: 1,
+          likes: { $ifNull: ["$likes", 0] },
+          commentsCount: { $size: { $ifNull: ["$comments", []] } },
+        },
+      },
+      {
+        $group: {
+          _id: "$artistId",
+          postsCount: { $sum: 1 },
+          likesReceived: { $sum: "$likes" },
+          commentsReceived: { $sum: "$commentsCount" },
+        },
+      },
+    ]);
+
+    const activityStats = await ActivityLog.aggregate([
+      { $match: { userId: { $in: accountIds } } },
+      {
+        $group: {
+          _id: "$userId",
+          totalEvents: { $sum: 1 },
+          likesGiven: { $sum: { $cond: [{ $eq: ["$eventType", "like"] }, 1, 0] } },
+          commentsMade: { $sum: { $cond: [{ $eq: ["$eventType", "comment_create"] }, 1, 0] } },
+          followsGiven: { $sum: { $cond: [{ $eq: ["$eventType", "follow"] }, 1, 0] } },
+          lastActiveAt: { $max: "$timestamp" },
+        },
+      },
+    ]);
+
+    const postMap = new Map(postStats.map((s) => [String(s._id), s]));
+    const activityMap = new Map(activityStats.map((s) => [String(s._id), s]));
+
+    const items = accounts.map((account) => {
+      const id = String(account._id);
+      const ps = postMap.get(id) || {};
+      const as = activityMap.get(id) || {};
+      const followingCount = Array.isArray(account.following) ? account.following.length : 0;
+      const botProbability = Math.max(
+        0,
+        Math.min(
+          1,
+          Number(account.botScore ?? account.behaviorFeatures?.botScore ?? 0)
+        )
+      );
+
+      return {
+        profile: {
+          id,
+          username: account.username,
+          bio: account.bio || "",
+          followersCount: Number(account.followersCount || 0),
+          followingCount,
+          createdAt: account.createdAt || null,
+          lastBehaviorComputedAt: account.lastBehaviorComputedAt || null,
+        },
+        engagement: {
+          postsCount: Number(ps.postsCount || 0),
+          likesReceived: Number(ps.likesReceived || 0),
+          commentsReceived: Number(ps.commentsReceived || 0),
+          likesGiven: Number(as.likesGiven || 0),
+          commentsMade: Number(as.commentsMade || 0),
+          followsGiven: Number(as.followsGiven || 0),
+          totalEvents: Number(as.totalEvents || 0),
+          lastActiveAt: as.lastActiveAt || null,
+        },
+        bot: {
+          probability: Number(botProbability.toFixed(4)),
+          behaviorFeatures: account.behaviorFeatures || {},
+        },
+      };
+    });
+
+    return res.json({
+      items,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch (err) {
+    console.error("Admin list accounts error:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.delete("/api/admin/accounts/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid account ID" });
+    }
+
+    const account = await Account.findById(id).lean();
+    if (!account) {
+      return res.status(404).json({ error: "Account not found" });
+    }
+
+    if (String(account.username || "").toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      return res.status(403).json({ error: "Cannot delete admin account" });
+    }
+
+    const usernameRegex = new RegExp(`^${escapeRegex(String(account.username || ""))}$`, "i");
+
+    await Post.deleteMany({ artistId: account._id });
+    await Post.updateMany(
+      {},
+      {
+        $pull: {
+          likedBy: { $in: [String(account.username || "").toLowerCase(), String(account.username || "")] },
+          comments: { user: usernameRegex },
+        },
+      }
+    );
+
+    await ActivityLog.deleteMany({
+      $or: [{ userId: account._id }, { username: usernameRegex }],
+    });
+
+    await Account.updateMany(
+      { following: account._id },
+      { $pull: { following: account._id } }
+    );
+
+    await Account.deleteOne({ _id: account._id });
+
+    // Recompute followersCount after relationship cleanup.
+    await Account.updateMany({}, { $set: { followersCount: 0 } });
+    const followerAgg = await Account.aggregate([
+      { $unwind: "$following" },
+      { $group: { _id: "$following", count: { $sum: 1 } } },
+    ]);
+    if (followerAgg.length) {
+      await Account.bulkWrite(
+        followerAgg.map((r) => ({
+          updateOne: {
+            filter: { _id: r._id },
+            update: { $set: { followersCount: r.count } },
+          },
+        }))
+      );
+    }
+
+    return res.json({ ok: true, deletedAccountId: id, username: account.username });
+  } catch (err) {
+    console.error("Admin delete account error:", err);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 app.post("/api/behavior/recompute", async (req, res) => {
   try {
     const limit = Math.min(Number(req.body?.limit) || 200, 5000);
@@ -871,3 +1132,4 @@ if ((process.env.BEHAVIOR_ANALYSIS_ENABLED || "true").toLowerCase() !== "false")
     );
   }, intervalMs);
 }
+

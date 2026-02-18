@@ -534,6 +534,8 @@ const NetworkFYP = ({ username }) => {
               onClick={() => {
                 localStorage.removeItem("accountId");
                 localStorage.removeItem("username");
+                localStorage.removeItem("role");
+                localStorage.removeItem("adminToken");
                 window.dispatchEvent(new Event("accountIdChanged"));
                 navigate("/login");
               }}
