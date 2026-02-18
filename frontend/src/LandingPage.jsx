@@ -1,104 +1,130 @@
+import React from "react";
 import { Link } from "react-router-dom";
-import "./App.css";
-import bg from "./assets/landingpagebackground.jpg";
+// Make sure the path matches your file structure
+import logoBg from "./assets/MacBook Air - 1.png"; 
 
 export default function LandingPage() {
   return (
-    <div style={{ position: "relative", minHeight: "100vh" }}>
-      {/* Full-screen fixed background (cannot be boxed by parent padding) */}
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: -1,
-          backgroundImage: `url(${bg})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
-        }}
-      />
+    <div style={styles.pageWrapper}>
+      <style>
+        {`
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
+          
+          .nav-link {
+            text-decoration: none;
+            color: #2D1B1B;
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            transition: all 0.2s ease;
+          }
+          .nav-link:hover { color: #A63D3D; }
 
-      {/* Page content */}
-      <div
-        style={{
-          minHeight: "100vh",
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "96px 16px 40px",
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: "920px",
-            padding: "34px 24px",
-            borderRadius: "22px",
-            textAlign: "center",
-            background: "rgba(255, 255, 255, 0.82)",
-            border: "1px solid rgba(0,0,0,0.08)",
-            boxShadow: "0 18px 50px rgba(0,0,0,0.18)",
-            backdropFilter: "blur(8px)",
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "8px 14px",
-              borderRadius: "999px",
-              background: "rgba(255,255,255,0.92)",
-              border: "1px solid rgba(0,0,0,0.08)",
-            }}
-          >
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 999,
-                background: "linear-gradient(135deg, #ff6aa2, #7c7cff)",
-                boxShadow: "0 0 0 4px rgba(124,124,255,0.12)",
-              }}
-            />
-            <span style={{ fontSize: 13, color: "#444" }}>Welcome to LOOM ✨</span>
-          </div>
+          .get-started-btn {
+            display: inline-block;
+            padding: 18px 50px;
+            border: 2px solid #2D1B1B;
+            color: #2D1B1B;
+            text-decoration: none;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          }
+          .get-started-btn:hover {
+            background: #2D1B1B;
+            color: #F8F5F0;
+            transform: translateY(-3px);
+          }
+        `}
+      </style>
 
-          <h1 style={{ margin: "14px 0 8px", fontSize: 46, letterSpacing: "-0.6px" }}>
-            LOOM
-          </h1>
+      {/* Hero Section */}
+      <main style={styles.mainContent}>
+        {/* The PNG Background: Set to absolute so it scrolls with the content */}
+        <div style={{
+          ...styles.backgroundLayer,
+          backgroundImage: `url(${logoBg})`
+        }} />
 
-          <p style={{ margin: "0 auto", color: "#444", lineHeight: 1.7, maxWidth: "62ch" }}>
-            A cozy little place to share posts and view your profile.
-          </p>
-
-          <div style={{ marginTop: 22, display: "flex", justifyContent: "center" }}>
-            <Link
-              to="/login"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "12px 24px",
-                borderRadius: "999px",
-                textDecoration: "none",
-                fontWeight: 800,
-                letterSpacing: "0.2px",
-                color: "white",
-                background: "linear-gradient(90deg, #3dd5f3, #b14dff)",
-                boxShadow: "0 12px 22px rgba(177, 77, 255, 0.25)",
-              }}
-            >
-              Get Started&nbsp;→
-            </Link>
-          </div>
-
-          <div style={{ marginTop: 18, fontSize: 12, color: "#666" }}>
-            Click Get Started to login.
-          </div>
+        <div style={styles.ctaContainer}>
+          <Link to="/login" className="get-started-btn">
+            GET STARTED &nbsp; →
+          </Link>
         </div>
-      </div>
+      </main>
+
+      {/* Adding some extra height/content below so you can see the scroll effect */}
+      <section style={styles.infoSection}>
+        <p style={styles.footerText}>SECURED BY SUB-PERCEPTUAL PERTURBATIONS</p>
+      </section>
     </div>
   );
 }
+
+const styles = {
+  pageWrapper: {
+    backgroundColor: "#FFFBF3", // Parchment background
+    minHeight: "150vh", // Extra height to enable scrolling
+    width: "100%",
+    position: "relative",
+  },
+  nav: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "40px 60px",
+    position: "relative",
+    zIndex: 10,
+  },
+  brand: {
+    fontSize: "22px",
+    fontWeight: "900",
+    letterSpacing: "0.2em",
+    color: "#2D1B1B",
+  },
+  navLinks: {
+    display: "flex",
+    gap: "40px",
+  },
+  mainContent: {
+    position: "relative",
+    height: "90vh",
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    
+  },
+  backgroundLayer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    zIndex: 1,
+    backgroundSize: "contain",
+    backgroundPosition: "center",
+    backgroundRepeat: "no-repeat",
+    pointerEvents: "none", // Allows clicks to pass through to the button
+  },
+  ctaContainer: {
+    position: "relative",
+    zIndex: 5,
+    marginTop: "80vh", // Adjust this to move the button up or down relative to the logo
+  },
+  infoSection: {
+    height: "50vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderTop: "1px solid rgba(45, 27, 27, 0.1)",
+  },
+  footerText: {
+    fontSize: "12px",
+    fontWeight: "800",
+    letterSpacing: "0.2em",
+    opacity: 0.5,
+  }
+};

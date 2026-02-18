@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 
 import NetworkFYP from "./NetworkFYP";
@@ -8,14 +8,31 @@ import LoginPage from "./LoginPage";
 import SignUpPage from "./SignUpPage";
 import ProfilePage from "./ProfilePage";
 import AboutPage from "./AboutPage";
+import SearchPage from "./SearchPage";
 
 const GRADIENT = "linear-gradient(90deg, #3dd5f3, #b14dff)";
 const NAV_HEIGHT = 56; // keep content from hiding under fixed nav
 
 function App() {
   const [open, setOpen] = useState(false);
-  const storedAccountId =
-    typeof window !== "undefined" ? localStorage.getItem("accountId") : null;
+  const [accountId, setAccountId] = useState(
+    typeof window !== "undefined" ? localStorage.getItem("accountId") : null
+  );
+  
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setAccountId(localStorage.getItem("accountId"));
+    };
+    
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("accountIdChanged", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("accountIdChanged", handleStorageChange);
+    };
+  }, []);
+  
+  const storedAccountId = accountId;
   const profilePath = storedAccountId ? "/profile/" + encodeURIComponent(storedAccountId) : "/profile";
 
   return (
@@ -52,48 +69,109 @@ function App() {
           LOOM
         </Link>
 
-        {/* right: themed dropdown */}
-        <div style={{ position: "relative" }}>
-          <button
-            onClick={() => setOpen((v) => !v)}
-            style={{
-              border: "none",
-              borderRadius: "999px",
-              padding: "9px 14px",
-              cursor: "pointer",
-              fontWeight: 800,
-              color: "white",
-              background: GRADIENT,
-              boxShadow: "0 10px 18px rgba(177, 77, 255, 0.22)",
-            }}
-            aria-haspopup="menu"
-            aria-expanded={open}
-          >
-            Menu ▾
-          </button>
-
-          {open && (
-            <div
-              style={{
-                position: "absolute",
-                right: 0,
-                top: "calc(100% + 10px)",
-                width: "190px",
-                borderRadius: "14px",
-                padding: "8px",
-                background: "rgba(255,255,255,0.95)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                boxShadow: "0 16px 40px rgba(0,0,0,0.14)",
-                zIndex: 50,
-              }}
-              role="menu"
-            >
-              <MenuItem to="/" label="Home" onPick={() => setOpen(false)} />
-              <MenuItem to="/about" label="About" onPick={() => setOpen(false)} />
-              <MenuItem to="/login" label="Login" onPick={() => setOpen(false)} />
-              <MenuItem to={profilePath} label="Profile" onPick={() => setOpen(false)} />
-              <MenuItem to="/fyp" label="For You" onPick={() => setOpen(false)} />
-            </div>
+        {/* right: nav links */}
+        <div style={{ display: "flex", gap: "30px", alignItems: "center" }}>
+          {storedAccountId ? (
+            <>
+              <Link
+                to="/fyp"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                For You
+              </Link>
+              <Link
+                to="/about"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                About
+              </Link>
+              <Link
+                to="/search"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                Search
+              </Link>
+              <Link
+                to={profilePath}
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                Profile
+              </Link>
+              <button
+                onClick={() => {
+                  localStorage.removeItem("accountId");
+                  window.dispatchEvent(new Event("accountIdChanged"));
+                  window.location.href = "/";
+                }}
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/about"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                About
+              </Link>
+              <Link
+                to="/search"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                Search
+              </Link>
+              <Link
+                to="/login"
+                style={{
+                  textDecoration: "none",
+                  fontWeight: 700,
+                  color: "#111",
+                  fontSize: "14px",
+                }}
+              >
+                Login
+              </Link>
+            </>
           )}
         </div>
       </nav>
@@ -106,6 +184,7 @@ function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/profile/:artistId" element={<ProfilePage />} />
         <Route path="/fyp" element={<NetworkFYP />} />
+        <Route path="/search" element={<SearchPage />} />
       </Routes>
     </BrowserRouter>
   );
