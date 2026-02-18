@@ -173,13 +173,14 @@ app.get("/api/accounts/id/:id", async (req, res) => {
 app.get("/api/fyp", async (req, res) => {
   try {
     const { username } = req.query;
+    const normalizedUsername = String(username || "").trim().toLowerCase();
     const limit = Math.min(parseInt(req.query.limit) || 20, 100); // Cap at 100 for safety
 
     let query = {};
-    if (username && username !== "undefined" && username !== "null") {
+    if (normalizedUsername && normalizedUsername !== "undefined" && normalizedUsername !== "null") {
       query = {
-        user: { $ne: username },
-        likedBy: { $ne: username },
+        user: { $ne: normalizedUsername },
+        likedBy: { $ne: normalizedUsername },
       };
     }
 
@@ -195,13 +196,39 @@ app.get("/api/fyp", async (req, res) => {
     }));
 
     let recommended = null;
+    let interactionHistory = [];
+    let followedArtistIds = [];
+
+    if (normalizedUsername) {
+      const usernameRegex = new RegExp(`^${escapeRegex(normalizedUsername)}$`, "i");
+      const account = await Account.findOne({ username: usernameRegex }).lean();
+      followedArtistIds = (account?.following || []).map((id) => String(id));
+
+      // Build affinity interactions from existing likes/comments.
+      interactionHistory = serializedPosts.flatMap((post) => {
+        const events = [];
+        if ((post.likedBy || []).map((u) => String(u).toLowerCase()).includes(normalizedUsername)) {
+          events.push({ weight: 1.0, tags: post.mlTags || {} });
+        }
+        const ownComments = (post.comments || []).filter(
+          (c) => String(c?.user || "").toLowerCase() === normalizedUsername
+        );
+        ownComments.forEach(() => {
+          events.push({ weight: 0.85, tags: post.mlTags || {} });
+        });
+        return events;
+      });
+    }
+
     try {
       const pyResponse = await nodeFetch(`${ML_SERVICE_URL}/recommendation/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           posts: serializedPosts,
-          user_id: username || null,
+          user_id: normalizedUsername || null,
+          interaction_history: interactionHistory,
+          followed_artist_ids: followedArtistIds,
           top_n: limit,
         }),
       });
@@ -358,6 +385,25 @@ app.patch("/api/posts/:id/like", async (req, res) => {
       );
     }
 
+    if (!alreadyLiked) {
+      try {
+        const allPosts = await Post.find({}, "_id").lean();
+        const allPostIds = allPosts.map((p) => p._id.toString());
+        await nodeFetch(`${ML_SERVICE_URL}/recommendation/interaction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: normalizedUsername,
+            post_id: String(id),
+            interaction_type: "like",
+            all_post_ids: allPostIds,
+          }),
+        });
+      } catch (mlErr) {
+        console.warn("Like interaction tracking failed:", mlErr.message || mlErr);
+      }
+    }
+
     res.json(updatedPost);
 
   } catch (err) {
@@ -482,6 +528,23 @@ app.post("/api/posts/:id/comment", async (req, res) => {
       { $push: { comments: comment } },
       { new: true }
     );
+
+    try {
+      const allPosts = await Post.find({}, "_id").lean();
+      const allPostIds = allPosts.map((p) => p._id.toString());
+      await nodeFetch(`${ML_SERVICE_URL}/recommendation/interaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: String(username).toLowerCase(),
+          post_id: String(id),
+          interaction_type: "comment",
+          all_post_ids: allPostIds,
+        }),
+      });
+    } catch (mlErr) {
+      console.warn("Comment interaction tracking failed:", mlErr.message || mlErr);
+    }
 
     res.json(updated);
   } catch (err) {

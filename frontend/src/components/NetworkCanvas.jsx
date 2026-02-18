@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 const NetworkCanvas = ({
   nodes,
   links,
+  linkColors = {},
   width,
   height,
   onNodeClick,
@@ -106,8 +107,16 @@ const NetworkCanvas = ({
     links.forEach((link) => {
       if (link.source && link.target) {
         const strength = Math.max(0.08, Math.min(1, link.strength || 0.2));
-        ctx.strokeStyle = `rgba(107, 112, 92, ${0.32 + strength * 0.5})`;
-        ctx.lineWidth = 1.6 + strength * 2.8;
+        const typeColor = linkColors[link.type] || "#6B705C";
+        const alpha = Math.min(0.95, 0.26 + strength * 0.58);
+        // Hex fallback with alpha support.
+        const stroke = typeColor.startsWith("#")
+          ? `${typeColor}${Math.round(alpha * 255)
+              .toString(16)
+              .padStart(2, "0")}`
+          : typeColor;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.6 + strength * 2.6;
         ctx.beginPath();
         ctx.moveTo(link.source.x, link.source.y);
         ctx.lineTo(link.target.x, link.target.y);
@@ -179,7 +188,7 @@ const NetworkCanvas = ({
     });
 
     ctx.restore();
-  }, [nodes, links, width, height, selectedNodeId, hoveredNodeId, scale, pan]);
+  }, [nodes, links, width, height, selectedNodeId, hoveredNodeId, scale, pan, linkColors]);
 
   // Get node at point for click detection
   const getNodeAtPoint = (canvasX, canvasY) => {

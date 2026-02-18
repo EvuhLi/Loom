@@ -62,8 +62,10 @@ DIVERSITY_THRESHOLD = 0.45
 
 INTERACTION_WEIGHTS = {
     "like":    1.0,
-    "comment": 0.8,
+    "comment": 0.85,
 }
+
+FOLLOW_BOOST = 0.12
 
 CATEGORY_WEIGHTS = {
     "medium":             0.15,
@@ -284,20 +286,30 @@ def compute_tag_score(post_tags: dict, user_affinity: dict,
 
 def compute_hybrid_score(user_id: Optional[str], post: dict,
                          user_affinity: dict, seen_tag_counts: dict,
-                         exploration: float = 0.10) -> float:
+                         exploration: float = 0.10,
+                         followed_artist_ids: Optional[set] = None) -> float:
     post_id   = str(post.get("_id", ""))
+    artist_id = str(post.get("artistId", ""))
     post_tags = post.get("mlTags") or {}
     tag_score = compute_tag_score(post_tags, user_affinity, seen_tag_counts, exploration)
 
+    # Keep recommendation complexity intact; this is a small additive preference.
+    followed_boost = (
+        FOLLOW_BOOST
+        if followed_artist_ids and artist_id and artist_id in followed_artist_ids
+        else 0.0
+    )
+
     if not user_id or not post_id:
-        return tag_score
+        return min(1.0, tag_score + followed_boost)
 
     alpha = _model.ncf_weight(user_id)
     if alpha == 0.0:
-        return tag_score
+        return min(1.0, tag_score + followed_boost)
 
     ncf_score = _model.predict(user_id, post_id)
-    return round(alpha * ncf_score + (1 - alpha) * tag_score, 4)
+    base = alpha * ncf_score + (1 - alpha) * tag_score
+    return round(min(1.0, base + followed_boost), 4)
 
 
 # ==========================================
@@ -359,6 +371,7 @@ class RecommendRequest(BaseModel):
     posts: List[Dict[str, Any]]
     user_id: Optional[str] = None
     interaction_history: Optional[List[Dict[str, Any]]] = []
+    followed_artist_ids: Optional[List[str]] = []
     top_n: Optional[int] = 20
     exploration_factor: Optional[float] = 0.15
 
@@ -388,6 +401,7 @@ def recommend(req: RecommendRequest):
         return []
 
     affinity = build_user_affinity(req.interaction_history or [])
+    followed_artist_ids = set(req.followed_artist_ids or [])
 
     n_serendipity  = max(1, int(top_n * SERENDIPITY_RATIO))
     n_personalised = top_n - n_serendipity
@@ -395,7 +409,14 @@ def recommend(req: RecommendRequest):
     # First pass — score without tag decay
     empty_seen: dict = {}
     for post in posts:
-        post["score"]      = compute_hybrid_score(user_id, post, affinity, empty_seen, exploration)
+        post["score"]      = compute_hybrid_score(
+            user_id,
+            post,
+            affinity,
+            empty_seen,
+            exploration,
+            followed_artist_ids,
+        )
         post["ncf_weight"] = _model.ncf_weight(user_id) if user_id else 0.0
 
     personalised, seen_counts = assemble_feed(posts, n_personalised)
@@ -403,7 +424,14 @@ def recommend(req: RecommendRequest):
     # Second pass — re-score remainder with decay
     remaining = [p for p in posts if p not in personalised]
     for post in remaining:
-        post["score"] = compute_hybrid_score(user_id, post, affinity, seen_counts, exploration)
+        post["score"] = compute_hybrid_score(
+            user_id,
+            post,
+            affinity,
+            seen_counts,
+            exploration,
+            followed_artist_ids,
+        )
 
     serendipity = pick_serendipity(remaining, personalised, n_serendipity)
     for post in serendipity:

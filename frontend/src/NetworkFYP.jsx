@@ -8,7 +8,23 @@ const BACKEND_URL = "http://localhost:3001";
 const INITIAL_VISIBLE_NODES = 28;
 const FETCH_LIMIT = 80;
 const LOAD_MORE_STEP = 16;
-const NETWORK_LINK_THRESHOLD = 0.12;
+const CATEGORY_THRESHOLDS = {
+  medium: 0.2,
+  subject: 0.2,
+  style: 0.2,
+  mood: 0.2,
+  color_palette: 0.2,
+  aesthetic_features: 0.2,
+};
+const LINK_COLORS = {
+  medium: "#6B705C",
+  subject: "#CB997E",
+  style: "#A5A58D",
+  mood: "#B08968",
+  color_palette: "#7F5539",
+  aesthetic_features: "#84A98C",
+  follower: "#B56576",
+};
 
 const NetworkFYP = ({ username }) => {
   const [posts, setPosts] = useState([]);
@@ -17,6 +33,16 @@ const NetworkFYP = ({ username }) => {
   const [likedPosts, setLikedPosts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [followingSet, setFollowingSet] = useState(new Set());
+  const [linkFilters, setLinkFilters] = useState({
+    medium: true,
+    subject: true,
+    style: true,
+    mood: true,
+    color_palette: true,
+    aesthetic_features: true,
+    follower: true,
+  });
   
   const [selectedPost, setSelectedPost] = useState(null);
   const [scale, setScale] = useState(1);
@@ -31,6 +57,25 @@ const NetworkFYP = ({ username }) => {
   const activeUser = username || localStorage.getItem("username") || "";
   const accountId = localStorage.getItem("accountId") || "";
   const profilePath = accountId ? `/profile/${encodeURIComponent(accountId)}` : "/profile";
+
+  useEffect(() => {
+    const loadFollowing = async () => {
+      if (!accountId) {
+        setFollowingSet(new Set());
+        return;
+      }
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/accounts/id/${encodeURIComponent(accountId)}`);
+        if (!res.ok) return;
+        const account = await res.json();
+        const ids = new Set((account?.following || []).map((id) => String(id)));
+        setFollowingSet(ids);
+      } catch (e) {
+        console.warn("Failed to load following set:", e);
+      }
+    };
+    loadFollowing();
+  }, [accountId]);
 
   // Keep canvas in sync with actual container dimensions.
   useEffect(() => {
@@ -86,27 +131,6 @@ const NetworkFYP = ({ username }) => {
   const links = useMemo(() => {
     if (!nodes.length) return [];
 
-    const extractLabels = (post) => {
-      const labels = new Set();
-      if (post?.mlTags && typeof post.mlTags === "object") {
-        Object.values(post.mlTags).forEach((tagList) => {
-          if (Array.isArray(tagList)) {
-            tagList.forEach((tag) => {
-              const label = String(tag?.label || "").trim().toLowerCase();
-              if (label) labels.add(label);
-            });
-          }
-        });
-      }
-      if (Array.isArray(post?.tags)) {
-        post.tags.forEach((tag) => {
-          const label = String(tag || "").trim().toLowerCase();
-          if (label) labels.add(label);
-        });
-      }
-      return labels;
-    };
-
     const similarity = (labelsA, labelsB) => {
       if (!labelsA.size || !labelsB.size) return 0;
       const intersection = new Set([...labelsA].filter((x) => labelsB.has(x)));
@@ -114,29 +138,71 @@ const NetworkFYP = ({ username }) => {
       return union.size ? intersection.size / union.size : 0;
     };
 
-    const labelsByIndex = nodes.map((n) => extractLabels(n.post));
+    const labelsFor = (post, category) => {
+      const labels = new Set();
+      if (category === "medium") {
+        const mediumLabel = String(post?.medium || "").trim().toLowerCase();
+        if (mediumLabel) labels.add(mediumLabel);
+      }
+      if (post?.mlTags && Array.isArray(post.mlTags[category])) {
+        post.mlTags[category].forEach((tag) => {
+          const label = String(tag?.label || "").trim().toLowerCase();
+          if (label) labels.add(label);
+        });
+      }
+      return labels;
+    };
+
+    const perCategoryLabels = {};
+    Object.keys(CATEGORY_THRESHOLDS).forEach((category) => {
+      perCategoryLabels[category] = nodes.map((n) => labelsFor(n.post, category));
+    });
+
     const built = [];
 
     for (let i = 0; i < nodes.length; i++) {
-      const candidates = [];
       for (let j = i + 1; j < nodes.length; j++) {
-        const score = similarity(labelsByIndex[i], labelsByIndex[j]);
-        if (score >= NETWORK_LINK_THRESHOLD) {
-          candidates.push({
+        Object.entries(CATEGORY_THRESHOLDS).forEach(([category, threshold]) => {
+          const score = similarity(
+            perCategoryLabels[category][i],
+            perCategoryLabels[category][j]
+          );
+          if (score >= threshold) {
+            built.push({
+              source: nodes[i],
+              target: nodes[j],
+              strength: score,
+              type: category,
+            });
+          }
+        });
+
+        const aArtistId = String(nodes[i]?.post?.artistId || "");
+        const bArtistId = String(nodes[j]?.post?.artistId || "");
+        if (
+          aArtistId &&
+          bArtistId &&
+          aArtistId !== bArtistId &&
+          followingSet.has(aArtistId) &&
+          followingSet.has(bArtistId)
+        ) {
+          built.push({
             source: nodes[i],
             target: nodes[j],
-            strength: score,
+            strength: 1,
+            type: "follower",
           });
         }
       }
-      candidates
-        .sort((a, b) => b.strength - a.strength)
-        .slice(0, 7)
-        .forEach((link) => built.push(link));
     }
 
     return built;
-  }, [nodes]);
+  }, [nodes, followingSet]);
+
+  const visibleLinks = useMemo(
+    () => links.filter((l) => linkFilters[l.type] !== false),
+    [links, linkFilters]
+  );
 
   // Fetch initial batch of posts
   const fetchPostsBatch = useCallback(async (limit = FETCH_LIMIT) => {
@@ -420,7 +486,8 @@ const NetworkFYP = ({ username }) => {
 
       <NetworkCanvas
         nodes={nodes}
-        links={links}
+        links={visibleLinks}
+        linkColors={LINK_COLORS}
         width={canvasSize.width}
         height={canvasSize.height}
         onNodeClick={handleNodeClick}
@@ -449,6 +516,23 @@ const NetworkFYP = ({ username }) => {
         <div style={styles.statusText}>
           Zoom: {(scale * 100).toFixed(0)}%
         </div>
+      </div>
+
+      <div style={styles.legendPanel}>
+        <p style={styles.legendTitle}>Connection Key</p>
+        {Object.entries(LINK_COLORS).map(([type, color]) => (
+          <label key={type} style={styles.legendRow}>
+            <input
+              type="checkbox"
+              checked={!!linkFilters[type]}
+              onChange={(e) =>
+                setLinkFilters((prev) => ({ ...prev, [type]: e.target.checked }))
+              }
+            />
+            <span style={{ ...styles.legendSwatch, backgroundColor: color }} />
+            <span style={styles.legendLabel}>{type.replace("_", " ")}</span>
+          </label>
+        ))}
       </div>
     </div>
   );
@@ -598,6 +682,41 @@ const styles = {
   },
   statusText: {
     margin: 0,
+  },
+  legendPanel: {
+    position: "fixed",
+    right: "16px",
+    bottom: "16px",
+    zIndex: 20,
+    minWidth: "190px",
+    padding: "10px 12px",
+    borderRadius: "12px",
+    backgroundColor: "rgba(253, 251, 247, 0.92)",
+    border: "1px solid rgba(165, 165, 141, 0.45)",
+    boxShadow: "0 10px 22px rgba(0,0,0,0.08)",
+  },
+  legendTitle: {
+    margin: "0 0 8px",
+    fontSize: "12px",
+    fontWeight: 700,
+    color: "#4A4A4A",
+  },
+  legendRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "6px",
+    fontSize: "12px",
+    color: "#4A4A4A",
+  },
+  legendSwatch: {
+    width: "18px",
+    height: "3px",
+    borderRadius: "2px",
+    display: "inline-block",
+  },
+  legendLabel: {
+    textTransform: "capitalize",
   },
 };
 
