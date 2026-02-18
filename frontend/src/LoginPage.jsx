@@ -42,7 +42,7 @@ export default function LoginPage() {
       if (response.ok && data.user) {
         localStorage.setItem("username", data.user.username);
         localStorage.setItem("accountId", data.user.id || "");
-        alert("Login Successful!");
+        window.dispatchEvent(new Event("accountIdChanged"));
         const targetProfileId = data.user.id || localStorage.getItem("accountId");
         navigate(targetProfileId ? "/profile/" + encodeURIComponent(targetProfileId) : "/profile");
       } else {
