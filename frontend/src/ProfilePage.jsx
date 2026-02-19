@@ -871,7 +871,10 @@ const ProfilePage = () => {
         alert("Community service is not available yet. Restart backend to load new routes.");
         return;
       }
-      if (!res.ok) throw new Error("Failed to create community");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to create community");
+      }
       const created = await res.json();
       const normalized = {
         _id: String(created._id || ""),
@@ -892,7 +895,7 @@ const ProfilePage = () => {
       setNewCommunityVisibility("public");
     } catch (err) {
       console.error("Create community failed:", err);
-      alert("Could not create community.");
+      alert(err?.message || "Could not create community.");
     } finally {
       setIsCreatingCommunity(false);
     }
