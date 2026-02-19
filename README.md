@@ -79,7 +79,7 @@ VITE_BACKEND_URL=http://localhost:3001
 
 ### Running Locally
 
-#### Option 1: Run both services concurrently (recommended)
+#### Run both services concurrently (recommended)
 ```bash
 npm run dev
 ```
