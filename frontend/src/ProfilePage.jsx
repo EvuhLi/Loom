@@ -255,6 +255,12 @@ const ProfilePage = () => {
     return String(value);
   };
 
+  // ─── Extract IDs now that normalizeId is defined ───
+  const currentUserId = normalizeId(currentUser?._id);
+  const profileOwnerId = normalizeId(profileOwner?._id);
+  const currentUsername = String(currentUser?.username || "").toLowerCase();
+  const profileOwnerUsername = String(profileOwner?.username || "").toLowerCase();
+
   const visiblePosts = (() => {
     const filtered = posts.filter((post) => {
     const postArtistId = normalizeId(
@@ -499,13 +505,13 @@ const ProfilePage = () => {
         setViewer((prev) =>
           normalizeId(prev?._id) === normalizeId(updated?._id) ? updated : prev
         );
+        // Clear cache so updated profile pic doesn't get overwritten by stale cache
         try {
-          localStorage.setItem(
-            profileCacheKey,
-            JSON.stringify({ ts: Date.now(), user: updated, posts })
-          );
+          localStorage.removeItem(profileCacheKey);
+          localStorage.removeItem(`profile-cache:${updated?._id}`);
+          localStorage.removeItem(`profile-cache:${updated?.username?.toLowerCase()}`);
         } catch (e) {
-          // ignore cache write errors
+          // ignore cache errors
         }
         setIsProfileUploadOpen(false);
         setNewProfilePicFile(null);
@@ -535,11 +541,19 @@ const ProfilePage = () => {
     setIsUpdatingBio(true);
     try {
       // 1. We must target the specific user by their ID
-      const userIdToUpdate = currentUser?._id?.$oid || currentUser?._id || currentUser?.id;
+      // Use the viewer's ID if available, otherwise fall back to stored account ID
+      let userIdToUpdate = currentUser?._id?.$oid || currentUser?._id || currentUser?.id;
+      
+      // If currentUser is just defaultUser (no ID), use storedAccountId
+      if (!userIdToUpdate && storedAccountId) {
+        userIdToUpdate = storedAccountId;
+      }
       
       if (!userIdToUpdate) {
-        throw new Error("Could not find user ID to update.");
+        throw new Error("Could not find user ID to update. Please log in first.");
       }
+
+      console.log("[Bio Update] Attempting to update bio for user:", userIdToUpdate, "Bio:", bioEditValue);
 
       const response = await fetch(`${BACKEND_URL}/api/accounts/${userIdToUpdate}/bio`, {
         method: "PATCH",
@@ -549,20 +563,37 @@ const ProfilePage = () => {
         }),
       });
 
+      console.log("[Bio Update] Response status:", response.status);
+      
+      const responseText = await response.text();
+      console.log("[Bio Update] Response text (first 200 chars):", responseText.substring(0, 200));
+      
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        console.error("[Bio Update] Failed to parse JSON. Backend likely crashed. Response:", responseText.substring(0, 500));
+        throw new Error(`Backend error (status ${response.status}): ${responseText.substring(0, 100)}`);
+      }
+      
+      console.log("[Bio Update] Response data:", responseData);
+
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to update bio");
+        throw new Error(responseData.error || `Failed to update bio (status ${response.status})`);
       }
 
-      const updatedUser = await response.json();
+      const updatedUser = responseData;
       
       // 2. Update the state so the new bio shows up immediately
       setUser(updatedUser);
       setViewer(updatedUser);
       
       // 3. Clear the cache so it doesn't revert on refresh
+      localStorage.removeItem(profileCacheKey);
       localStorage.removeItem(`profile-cache:${userIdToUpdate}`);
       localStorage.removeItem(`profile-cache:${currentUser?.username?.toLowerCase()}`);
+      localStorage.removeItem(`profile-cache:${updatedUser?._id}`);
+      localStorage.removeItem(`profile-cache:${updatedUser?.username?.toLowerCase()}`);
       
       handleCloseBioModal();
     } catch (err) {
@@ -746,11 +777,6 @@ const ProfilePage = () => {
       setIsCreatingAccount(false);
     }
   };
-
-  const currentUserId = normalizeId(currentUser?._id);
-  const profileOwnerId = normalizeId(profileOwner?._id);
-  const currentUsername = String(currentUser?.username || "").toLowerCase();
-  const profileOwnerUsername = String(profileOwner?.username || "").toLowerCase();
 
   const followCacheKey = currentUsername && profileOwnerId
     ? `follow-cache:${currentUsername}:${profileOwnerId}`

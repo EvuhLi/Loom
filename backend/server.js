@@ -1070,10 +1070,6 @@ app.patch("/api/accounts/:id/bio", async (req, res) => {
     const { id } = req.params;
     const { bio } = req.body;
 
-    if (!isDbReady()) {
-      return res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-    }
-
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid target account ID" });
     }
@@ -1084,13 +1080,16 @@ app.patch("/api/accounts/:id/bio", async (req, res) => {
       { new: true }
     );
 
-    if (!updated) return res.status(404).json({ error: "Account not found" });
+    if (!updated) {
+      console.error(`[Bio Update] Account not found for ID: ${id}`);
+      return res.status(404).json({ error: "Account not found" });
+    }
+    
+    console.log(`[Bio Update] Successfully updated bio for account ${id}`);
     res.json(updated);
   } catch (err) {
     console.error("Bio Update Error:", err?.message || err);
-    if (isTransientDbError(err)) {
-      return res.status(503).json({ error: "Bio update temporarily unavailable. Retry shortly." });
-    }
+    console.error("Bio Update Stack:", err?.stack);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
