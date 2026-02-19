@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import React, { useState } from "react";
-=======
-import React, { useEffect, useState } from "react";
->>>>>>> e61095d (dabest)
 import { Link } from "react-router-dom";
 
 const BACKEND_URL = "http://localhost:3001";
@@ -13,7 +9,6 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-<<<<<<< HEAD
   const handleSearch = async (searchQuery) => {
     if (!searchQuery.trim()) {
       setUsers([]);
@@ -29,7 +24,7 @@ export default function SearchPage() {
       );
       if (!res.ok) throw new Error("Search failed");
       const data = await res.json();
-      setUsers(data);
+      setUsers(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Search error:", err);
       setError("Could not search users.");
@@ -44,46 +39,12 @@ export default function SearchPage() {
     setQuery(newQuery);
     handleSearch(newQuery);
   };
-=======
-  useEffect(() => {
-    let active = true;
-    const timeout = setTimeout(async () => {
-      try {
-        setLoading(true);
-        setError("");
-        const params = new URLSearchParams();
-        if (query.trim()) params.set("q", query.trim());
-        params.set("limit", "30");
-
-        const res = await fetch(`${BACKEND_URL}/api/accounts/search?${params.toString()}`);
-        if (!res.ok) throw new Error("Failed to search accounts");
-        const results = await res.json();
-
-        if (active) setArtists(Array.isArray(results) ? results : []);
-      } catch (err) {
-        console.error("Search load error:", err);
-        if (active) setError("Could not load artists.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    }, 220);
-
-    return () => {
-      active = false;
-      clearTimeout(timeout);
-    };
-  }, [query]);
->>>>>>> e61095d (dabest)
 
   return (
     <div style={page}>
       <div style={card}>
         <h1 style={title}>Search Artists</h1>
-<<<<<<< HEAD
         <p style={subtitle}>Search all users on Loom.</p>
-=======
-        <p style={subtitle}>Search accounts from MongoDB by username.</p>
->>>>>>> e61095d (dabest)
 
         <input
           value={query}
@@ -95,17 +56,10 @@ export default function SearchPage() {
         {loading && <p style={meta}>Searching...</p>}
         {error && <p style={errorText}>{error}</p>}
         {!loading && !error && query && (
-          <p style={meta}>
-<<<<<<< HEAD
-            {users.length} result{users.length === 1 ? "" : "s"}
-=======
-            {artists.length} result{artists.length === 1 ? "" : "s"}
->>>>>>> e61095d (dabest)
-          </p>
+          <p style={meta}>{users.length} result{users.length === 1 ? "" : "s"}</p>
         )}
 
         <div style={list}>
-<<<<<<< HEAD
           {users.map((user) => {
             const to = `/profile/${encodeURIComponent(user._id)}`;
             return (
@@ -114,16 +68,9 @@ export default function SearchPage() {
                   <span style={username}>{user.username}</span>
                   {user.bio && <p style={bio}>{user.bio}</p>}
                 </div>
-                <span style={count}>{user.followersCount || 0} follower{user.followersCount === 1 ? "" : "s"}</span>
-=======
-          {artists.map((artist) => {
-            const artistId = artist._id && typeof artist._id === "object" ? artist._id.$oid : artist._id;
-            const profilePath = artistId ? `/profile/${encodeURIComponent(String(artistId))}` : "/profile";
-            return (
-              <Link key={`${artist.username}-${artistId || "none"}`} to={profilePath} style={row}>
-                <span style={username}>{artist.username}</span>
-                <span style={count}>{artist.followersCount || 0} followers</span>
->>>>>>> e61095d (dabest)
+                <span style={count}>
+                  {user.followersCount || 0} follower{user.followersCount === 1 ? "" : "s"}
+                </span>
               </Link>
             );
           })}
