@@ -114,26 +114,21 @@ const CATEGORY_LABELS = {
 };
 
 const resolveTagsForDisplay = (post) => {
-  const mlTags = post.mlTags;
+  // 1. Get the tags from wherever they might be hiding
+  const rawTags = Array.isArray(post?.tags) ? post.tags : [];
+  const mlTags = Array.isArray(post?.mlTags) ? post.mlTags : [];
+  
+  // 2. Combine them and remove duplicates
+  const combined = [...new Set([...rawTags, ...mlTags])];
 
-  if (!mlTags || Object.keys(mlTags).length === 0) {
-    const legacyTags = (post.tags || []).map((label) => ({ label, confidence: null }));
-    return { manualTags: legacyTags, autoTags: [] };
-  }
+  // 3. Map them into the format the TagGroup component expects: { label }
+  const manualTags = combined
+    .filter(tag => typeof tag === "string" && tag.trim().length > 0)
+    .map(tag => ({ label: tag.trim(), confidence: null }));
 
-  const manualTags = (mlTags.manual || []).map((t) => ({
-    label: t.label,
-    confidence: t.confidence,
-  }));
-
-  const autoTags = Object.entries(mlTags)
-    .filter(([cat]) => cat !== "manual")
-    .flatMap(([category, tags]) =>
-      tags.map((t) => ({ label: t.label, confidence: t.confidence, category }))
-    )
-    .sort((a, b) => b.confidence - a.confidence);
-
-  return { manualTags, autoTags };
+  // 4. Since we flattened everything, we return autoTags as empty 
+  // or put them all in manualTags for now so they appear.
+  return { manualTags, autoTags: [] };
 };
 
 // ==========================================
@@ -287,6 +282,28 @@ const Post = ({
     }
   };
 
+  const fetchFullPost = async (postId) => {
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_URL || "http://localhost:3001"}/api/posts/${postId}/full`
+      );
+      if (!res.ok) return;
+      const fullPost = await res.json();
+      setSelectedPost((prev) => {
+        const prevId = String(prev?._id || prev?.id || "");
+        if (prevId !== String(postId)) return prev;
+        return {
+          ...prev,
+          ...fullPost,
+          url: prev?.url || fullPost?.url,
+          previewUrl: prev?.previewUrl || fullPost?.previewUrl,
+        };
+      });
+    } catch (err) {
+      console.warn("Full post fetch failed:", err);
+    }
+  };
+
   useEffect(() => {
     setSlideIndex(0);
     setCommentsPage(0);
@@ -305,6 +322,14 @@ const Post = ({
     } else if (selectedPost?._id) {
       // Only fetch if we don't have comments data
       fetchComments(selectedPost._id, 0);
+    }
+
+    if (selectedPost?._id) {
+      const hasMlTags = selectedPost?.mlTags && Object.keys(selectedPost.mlTags).length > 0;
+      const hasTags = Array.isArray(selectedPost?.tags) && selectedPost.tags.length > 0;
+      if (!hasMlTags && !hasTags) {
+        fetchFullPost(selectedPost._id);
+      }
     }
   }, [selectedPost]);
 

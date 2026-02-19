@@ -567,16 +567,22 @@ async def analyze(image: UploadFile = File(...)):
                 if total_tags >= MIN_TOTAL_TAGS:
                     break
 
-        # Keep categories sorted after supplemental additions.
-        for category in results:
-            if isinstance(results[category], list):
-                results[category].sort(
-                    key=lambda x: x.get("confidence", 0),
-                    reverse=True
-                )
+      # ... (keep your CLIP scoring loop that fills all_candidates) ...
 
-        return results
+        # 1. Sort every single tag found by its confidence score
+        # ... (after your loop that fills all_candidates) ...
 
+        # 1. Sort everything by confidence immediately
+        all_candidates.sort(key=lambda x: x["confidence"], reverse=True)
+
+        # 2. Grab the top 10, regardless of the threshold
+        # This ensures you NEVER return an empty list.
+        top_10_labels = [item["label"] for item in all_candidates[:10]]
+
+        logger.info(f"Final Tags being sent: {top_10_labels}") # Add this to see it in your terminal
+        return top_10_labels
+    
+    
     except Exception as e:
         logger.error(f"Analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

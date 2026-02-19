@@ -70,15 +70,25 @@ const analyzeImageTags = async (canvas) => {
   }
 };
 
-const mergeManualTags = (mlTagsRaw, userTagsArray) => {
-  const base = mlTagsRaw || {};
-  const existingLabels = new Set(
-    Object.values(base).flat().map((t) => t.label.toLowerCase())
+const mergeManualTags = (mlTagsArray, userTagsArray) => {
+  // 1. Ensure mlTagsArray is actually an array (fallback to empty)
+  const mlBase = Array.isArray(mlTagsArray) ? mlTagsArray : [];
+  
+  // 2. Create a set of lowercase labels for fast comparison
+  // We use ?. to safely call toLowerCase only if the tag exists
+  const mlLabelsLower = new Set(
+    mlBase
+      .filter(t => t) // Remove null/undefined
+      .map(t => String(t).toLowerCase())
   );
-  const manualTags = userTagsArray
-    .filter((label) => !existingLabels.has(label.toLowerCase()))
-    .map((label) => ({ label, confidence: 0.75 }));
-  return { ...base, manual: manualTags };
+
+  // 3. Process user tags: Remove duplicates that ML already found
+  const filteredUserTags = (userTagsArray || [])
+    .filter(tag => tag && typeof tag === 'string') // Safety check
+    .filter(tag => !mlLabelsLower.has(tag.toLowerCase()));
+
+  // 4. Return one flat array of strings (simple and clean)
+  return [...mlBase, ...filteredUserTags];
 };
 
 const fitSize = (width, height, maxSide) => {
@@ -650,22 +660,23 @@ const ProfilePage = () => {
       canvas.height = previewImg.height;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(previewImg, 0, 0);
-
-      const mlTagsRaw = await analyzeImageTags(canvas);
-      if (!mlTagsRaw) {
-        console.warn("ML tagging failed, continuing without ML tags");
+// 1. Get the raw tags from Python (e.g., ['sculpture', 'insect', ...])
+      const mlTagsRaw = await analyzeImageTags(canvas) || [];
+      
+      if (mlTagsRaw.length === 0) {
+        console.warn("ML tagging failed or returned no tags, continuing with manual tags only");
       }
+
+      // 2. Use the simplified merge function
+      // This now handles both as simple string arrays
       mergedMlTags = mergeManualTags(mlTagsRaw, userTagsArray);
-      flatTags = [
-        ...new Set([
-          ...userTagsArray,
-          ...Object.values(mergedMlTags)
-            .flat()
-            .map((t) => t.label),
-        ]),
-      ];
+
+      // 3. Create the flatTags array
+      // Since mergedMlTags is now just an array of strings, we don't need Object.values or .label
+      flatTags = [...new Set(mergedMlTags)];
 
       setScanStatus("Saving post...");
+      
       const payload = {
         user: normalizedCurrentUsername,
         artistId: normalizeId(currentUser?._id) || undefined,
@@ -676,11 +687,10 @@ const ProfilePage = () => {
         processSlides: cloakedSlides.slice(1),
         title: newTitle.trim(),
         description: newDescription.trim(),
-        tags: flatTags,
-        mlTags: mergedMlTags,
+        tags: flatTags,         // This will be ['tag1', 'tag2', ...]
+        mlTags: flatTags,       // Keeping it consistent
         date: new Date().toISOString(),
       };
-
       const response = await fetch(`${BACKEND_URL}/api/posts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
