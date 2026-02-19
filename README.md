@@ -58,6 +58,57 @@ cd ..
 5. Copy your **Site Key** → `VITE_RECAPTCHA_SITE_KEY` in `frontend/.env`
 6. Copy your **Secret Key** → `RECAPTCHA_SECRET_KEY` in `backend/.env`
 
+#### Tagging
+From logs, CLIP loads successfully. This test ensures the tagging endpoint functions correctly on macOS environments.
+
+1. Start the ML Service (macOS)
+
+Open Terminal on a Mac and run:
+cd ml-service
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main_ml:app --host 127.0.0.1 --port 8001
+
+If successful, the ML service will run locally at:
+
+http://127.0.0.1:8001
+
+2️. Verify the Tagging Endpoint Directly
+
+Use curl to test the tagging API:
+curl -F "image=@/path/to/test.jpg" http://127.0.0.1:8001/tagging/analyze
+
+You should receive JSON output similar to:
+{
+  "subject": "...",
+  "style": "...",
+  "confidence": ...
+}
+
+If it fails:
+Check Python version (python3 --version)
+Confirm virtual environment is activated
+Confirm port 8001 is not in use
+
+3️. Start the Backend (Proxy Verification)
+
+Now test the full app flow.
+cd backend
+npm ci
+npm run dev
+
+Upload an image through the UI
+This verifies:
+
+4. Automate macOS Validation in CI
+
+To ensure tagging continues working on macOS, add a GitHub Actions matrix job.
+
+Example: runs-on: macos-latest
+
+CI Steps: Boot ML service, Run the same curl tagging test, Assert JSON response
+
 #### Backend Configuration
 
 Create `backend/.env`:
