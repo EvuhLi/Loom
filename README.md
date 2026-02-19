@@ -80,6 +80,26 @@ If successful, the ML service will run locally at:
 http://127.0.0.1:8001
 ```
 
+##### 1. Start the ML Service (Windows)
+
+Open Command Prompt or PowerShell and run:
+
+```bash
+cd ml-service
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main_ml:app --host 127.0.0.1 --port 8001
+```
+
+If successful, the ML service will run locally at:
+
+```
+http://127.0.0.1:8001
+```
+
+**Note:** On Windows, use `python` instead of `python3`, and the activation script is in `.venv\Scripts\activate` (not `source`).
+
 ##### 2. Verify the Tagging Endpoint Directly
 
 Use curl to test the tagging API:
