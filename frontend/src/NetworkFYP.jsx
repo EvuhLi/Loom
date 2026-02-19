@@ -5,7 +5,7 @@ import { useArtProtection } from "./hooks/useArtProtection";
 import NetworkCanvas from "./components/NetworkCanvas";
 import PostModal from "./components/PostModal";
 
-const BACKEND_URL = "http://localhost:3001";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 const INITIAL_VISIBLE_NODES = 28;
 const FETCH_LIMIT = 48;
 const LOAD_MORE_STEP = 16;

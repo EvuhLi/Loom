@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useArtProtection } from "./hooks/useArtProtection";
 
-const BACKEND_URL = "http://localhost:3001";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 // If true, liking requires an authenticated username and will redirect to /login
 const REQUIRE_LOGIN_FOR_LIKES = true;
 
