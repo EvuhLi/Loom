@@ -931,6 +931,26 @@ app.post("/api/posts/:id/comment", async (req, res) => {
 // ACCOUNTS
 // =============================
 
+app.get("/api/accounts/search", async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+
+    const query = q ? { username: new RegExp(escapeRegex(q), "i") } : {};
+
+    const results = await Account.find(query)
+      .select("_id username bio followersCount profilePic")
+      .sort({ username: 1 })
+      .limit(limit)
+      .lean();
+
+    res.json(results);
+  } catch (err) {
+    console.error("Account Search Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 app.patch("/api/accounts/:id/profile-pic", async (req, res) => {
   try {
     const { id } = req.params;
