@@ -312,9 +312,40 @@ const NetworkFYP = ({ username }) => {
 
   // Fetch initial batch of posts
   const fetchPostsBatch = useCallback(async (limit = FETCH_LIMIT) => {
+    const CACHE_KEY = "network-fyp-cache";
+    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    
     setLoading(true);
     setError("");
     try {
+      // Try to load from cache first (stale-while-revalidate pattern)
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const { ts, posts: cachedPosts } = JSON.parse(cached);
+          if (Date.now() - ts < CACHE_TTL && Array.isArray(cachedPosts) && cachedPosts.length) {
+            const postsWithImages = cachedPosts.map((p) => ({
+              ...p,
+              url: p.previewUrl || p.url || "",
+            }));
+            setAllPosts(postsWithImages);
+            setPosts(postsWithImages.slice(0, INITIAL_VISIBLE_NODES));
+            
+            // Mark liked posts
+            const liked = {};
+            cachedPosts.forEach((post) => {
+              const postId = String(post._id || post.id);
+              if (post.likedBy && activeUser) {
+                liked[postId] = post.likedBy.includes(activeUser);
+              }
+            });
+            setLikedPosts(liked);
+          }
+        }
+      } catch (e) {
+        // Ignore cache errors
+      }
+
       const params = new URLSearchParams({ limit });
       if (activeUser && activeUser !== "null" && activeUser !== "undefined") {
         params.set("username", activeUser);
@@ -330,6 +361,13 @@ const NetworkFYP = ({ username }) => {
       }));
       setAllPosts(postsWithImages);
       setPosts(postsWithImages.slice(0, INITIAL_VISIBLE_NODES));
+      
+      // Cache the results
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), posts: data }));
+      } catch (e) {
+        // Ignore cache errors
+      }
       
       // Mark liked posts
       const liked = {};
