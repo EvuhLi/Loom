@@ -137,6 +137,7 @@ const NetworkFYP = ({ username }) => {
 
   const links = useMemo(() => {
     if (!nodes.length) return [];
+    const relaxedSmallFeed = nodes.length <= 8;
 
     const similarity = (labelsA, labelsB) => {
       if (!labelsA.size || !labelsB.size) return 0;
@@ -193,21 +194,31 @@ const NetworkFYP = ({ username }) => {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         let hasTagLink = false;
-        Object.entries(CATEGORY_THRESHOLDS).forEach(([category, threshold]) => {
-          const score = similarity(
-            perCategoryLabels[category][i],
-            perCategoryLabels[category][j]
-          );
-          if (score >= threshold) {
-            built.push({
-              source: nodes[i],
-              target: nodes[j],
-              strength: score,
-              type: category,
-            });
-            hasTagLink = true;
-          }
-        });
+        if (relaxedSmallFeed) {
+          built.push({
+            source: nodes[i],
+            target: nodes[j],
+            strength: 0.18,
+            type: "tag_overlap",
+          });
+          hasTagLink = true;
+        } else {
+          Object.entries(CATEGORY_THRESHOLDS).forEach(([category, threshold]) => {
+            const score = similarity(
+              perCategoryLabels[category][i],
+              perCategoryLabels[category][j]
+            );
+            if (score >= threshold) {
+              built.push({
+                source: nodes[i],
+                target: nodes[j],
+                strength: score,
+                type: category,
+              });
+              hasTagLink = true;
+            }
+          });
+        }
         if (hasTagLink) {
           tagDegree[i] += 1;
           tagDegree[j] += 1;
@@ -254,7 +265,7 @@ const NetworkFYP = ({ username }) => {
       if (nodes.length < 2) break;
       if (tagDegree[i] > 0) continue;
       const candidate = bestTagCandidate[i];
-      if (!candidate || candidate.score <= 0) continue;
+      if (!candidate) continue;
       const j = candidate.j;
       const a = String(nodes[i]?.id || "");
       const b = String(nodes[j]?.id || "");
@@ -263,12 +274,32 @@ const NetworkFYP = ({ username }) => {
       built.push({
         source: nodes[i],
         target: nodes[j],
-        strength: Math.max(0.08, candidate.score),
+        strength: Math.max(0.08, candidate.score || 0),
         type: "tag_overlap",
       });
       seenPairs.add(key);
       tagDegree[i] += 1;
       tagDegree[j] += 1;
+    }
+
+    // Final safety net: if links are still sparse, connect nodes in a ring.
+    // This guarantees visible structure even with tiny or dissimilar datasets.
+    if (nodes.length > 1 && built.length < nodes.length - 1) {
+      for (let i = 0; i < nodes.length; i++) {
+        const j = (i + 1) % nodes.length;
+        if (i === j) continue;
+        const a = String(nodes[i]?.id || "");
+        const b = String(nodes[j]?.id || "");
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (seenPairs.has(key)) continue;
+        built.push({
+          source: nodes[i],
+          target: nodes[j],
+          strength: 0.14,
+          type: "tag_overlap",
+        });
+        seenPairs.add(key);
+      }
     }
 
     return built;
