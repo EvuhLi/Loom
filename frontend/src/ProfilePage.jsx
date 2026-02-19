@@ -638,6 +638,22 @@ const ProfilePage = () => {
     }
   };
 
+
+  const handleDeletePost = async (postId) => {
+    try {
+      // 1. Tell the backend to delete it
+      await fetch(`${BACKEND_URL}/api/posts/${postId}`, {
+        method: "DELETE",
+      });
+      
+      // 2. Remove it from the UI without refreshing the page
+      setPosts((prevPosts) => prevPosts.filter((post) => String(post._id || post.id) !== postId));
+      
+    } catch (error) {
+      console.error("Failed to delete post:", error);
+    }
+  };
+
   return (
     <div style={styles.pageBackground}>
       <style>
@@ -829,6 +845,7 @@ const ProfilePage = () => {
               setSelectedPost={setSelectedPost}
               likedPosts={likedPosts}
               toggleButton={toggleButton}
+              deletePost={handleDeletePost}
               addComment={async (postId, text) => {
                 if (!text || !text.trim()) return null;
                 const pid = normalizeId(postId);

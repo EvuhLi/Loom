@@ -702,6 +702,35 @@ app.patch("/api/posts/:id/like", async (req, res) => {
 });
 
 // =============================
+// DELETE POST
+// =============================
+app.delete("/api/posts/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Check if the ID is a valid MongoDB ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid post ID" });
+    }
+
+    // 2. Find and delete the post
+    const deletedPost = await Post.findByIdAndDelete(id);
+
+    if (!deletedPost) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+  
+
+    res.status(200).json({ message: "Post deleted successfully", id });
+  } catch (err) {
+    console.error("Delete Post Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// =============================
 // AUTH
 // =============================
 

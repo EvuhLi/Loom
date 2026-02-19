@@ -172,6 +172,7 @@ const Post = ({
   likedPosts,
   toggleButton,
   addComment,
+  deletePost
 }) => {
   // Local state to prevent rapid-fire clicking
   const [isProcessing, setIsProcessing] = useState(false);
@@ -352,11 +353,43 @@ const Post = ({
                         : rawArtistId;
                     const label = postUsername || user.username || postArtistId;
                     if (postArtistId) {
-                      return <Link to={`/profile/${postArtistId}`}>{label}</Link>;
+                      return <Link to={`/profile/${postArtistId}`} style={{ color: "black", textDecoration: "none" }}>{label}</Link>;
                     }
                     return label;
                   })()}
                 </strong>
+
+                {/* --- ADDED DELETE BUTTON LOGIC --- */}
+                {(() => {
+                  // Figure out if the logged-in user owns this post
+                  const postArtistId = selectedPost.artistId?.$oid || selectedPost.artistId || (typeof selectedPost.user === 'object' ? selectedPost.user._id : undefined);
+                  const currentUserId = user?._id?.$oid || user?._id || user?.id;
+                  
+                  // Also check username as a fallback if IDs don't match or are missing
+                  const postUsername = typeof selectedPost.user === 'object' ? selectedPost.user.username : selectedPost.user;
+                  const currentUsername = user?.username;
+
+                  const isOwner = (postArtistId && currentUserId && String(postArtistId) === String(currentUserId)) || 
+                                  (postUsername && currentUsername && postUsername === currentUsername);
+
+                  if (isOwner && deletePost) {
+                    return (
+                      <button 
+                        style={styles.deleteBtn}
+                        onClick={async () => {
+                          if (window.confirm("Are you sure you want to delete this artwork?")) {
+                            const postId = String(selectedPost._id || selectedPost.id);
+                            await deletePost(postId);
+                            setSelectedPost(null); // Close the modal after deleting
+                          }
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div style={styles.modalMeta}>
@@ -557,7 +590,21 @@ const styles = {
     zIndex: 11,
   },
   modalInfoSide: { flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" },
-  modalHeader: { padding: "15px", borderBottom: "1px solid #efefef" },
+  modalHeader: { 
+    padding: "15px", 
+    borderBottom: "1px solid #efefef",
+    display: "flex", // Added for layout
+    justifyContent: "space-between", // Pushes the trash can to the right
+    alignItems: "center"
+  },
+  deleteBtn: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "18px",
+    opacity: 0.6,
+    transition: "opacity 0.2s",
+  },
   modalMeta: {
     padding: "12px 15px",
     borderBottom: "1px solid #efefef",
