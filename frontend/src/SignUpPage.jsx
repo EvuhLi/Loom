@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
+import AlertModal from "./components/AlertModal";
 import "./App.css";
 import weavingBg from "./assets/weaving_loom.jpg";
 
@@ -13,8 +14,16 @@ export default function SignUpPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [captchaToken, setCaptchaToken] = useState(null);
+  const [alertModal, setAlertModal] = useState({ open: false, title: "Notice", message: "" });
 
   const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
+
+  const showAlert = (message, title = "Notice") => {
+    setAlertModal({ open: true, title, message });
+  };
+  const closeAlert = () => {
+    setAlertModal((prev) => ({ ...prev, open: false }));
+  };
 
   const onCaptchaChange = (token) => {
     setCaptchaToken(token);
@@ -24,17 +33,17 @@ export default function SignUpPage() {
     if (e) e.preventDefault();
 
     if (siteKey && !captchaToken) {
-      alert("Please check the box to verify you are not a robot!");
+      showAlert("Please check the box to verify you are not a robot!");
       return;
     }
 
     if (!username || !password || !confirmPassword) {
-      alert("Please fill in username and password fields.");
+      showAlert("Please fill in username and password fields.");
       return;
     }
 
     if (password !== confirmPassword) {
-      alert("Passwords do not match.");
+      showAlert("Passwords do not match.");
       return;
     }
 
@@ -54,19 +63,25 @@ export default function SignUpPage() {
       const data = await response.json().catch(() => ({}));
 
       if (response.ok) {
-        alert("Sign Up Successful! Please login.");
+        showAlert("Sign Up Successful! Please login.", "Success");
         navigate("/login");
       } else {
-        alert("Sign Up Failed: " + (data.error || data.message || "Unknown error"));
+        showAlert("Sign Up Failed: " + (data.error || data.message || "Unknown error"), "Sign Up Failed");
       }
     } catch (error) {
       console.error("Error:", error);
-      alert("Something went wrong connecting to the server.");
+      showAlert("Something went wrong connecting to the server.", "Connection Error");
     }
   };
 
   return (
     <div style={styles.page}>
+      <AlertModal
+        open={alertModal.open}
+        title={alertModal.title}
+        message={alertModal.message}
+        onClose={closeAlert}
+      />
       <style>
         {`
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght;500;700;800&family=Playfair+Display:wght;700&display=swap');

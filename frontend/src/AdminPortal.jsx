@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import AlertModal from "./components/AlertModal";
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 
@@ -14,10 +15,18 @@ export default function AdminPortal() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [alertModal, setAlertModal] = useState({ open: false, title: "Notice", message: "" });
 
   const role = localStorage.getItem("role");
   const adminToken = localStorage.getItem("adminToken");
   const canAccess = role === "admin" && Boolean(adminToken);
+
+  const showAlert = (message, title = "Notice") => {
+    setAlertModal({ open: true, title, message });
+  };
+  const closeAlert = () => {
+    setAlertModal((prev) => ({ ...prev, open: false }));
+  };
 
   const authHeaders = useMemo(
     () => ({
@@ -76,7 +85,7 @@ export default function AdminPortal() {
       }
       setItems((prev) => prev.filter((item) => item?.profile?.id !== profileId));
     } catch (e) {
-      alert(e.message || "Delete failed");
+      showAlert(e.message || "Delete failed", "Delete Error");
     }
   };
 
@@ -87,6 +96,12 @@ export default function AdminPortal() {
 
   return (
     <div style={styles.page}>
+      <AlertModal
+        open={alertModal.open}
+        title={alertModal.title}
+        message={alertModal.message}
+        onClose={closeAlert}
+      />
       <div style={styles.headerRow}>
         <h1 style={styles.title}>Admin Portal</h1>
         <button

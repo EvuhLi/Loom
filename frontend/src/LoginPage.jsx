@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
+import AlertModal from "./components/AlertModal";
 import "./App.css";
 import collageBg from "./assets/collage.jpg";
 
@@ -11,8 +12,16 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [captchaToken, setCaptchaToken] = useState(null);
+  const [alertModal, setAlertModal] = useState({ open: false, title: "Notice", message: "" });
 
   const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
+
+  const showAlert = (message, title = "Notice") => {
+    setAlertModal({ open: true, title, message });
+  };
+  const closeAlert = () => {
+    setAlertModal((prev) => ({ ...prev, open: false }));
+  };
 
   const onCaptchaChange = (token) => {
     setCaptchaToken(token);
@@ -22,12 +31,12 @@ export default function LoginPage() {
     if (e) e.preventDefault();
 
     if (siteKey && !captchaToken) {
-      alert("Please check the box to verify you are not a robot!");
+      showAlert("Please check the box to verify you are not a robot!");
       return;
     }
 
     if (!username || !password) {
-      alert("Please enter both username and password.");
+      showAlert("Please enter both username and password.");
       return;
     }
 
@@ -60,16 +69,22 @@ export default function LoginPage() {
         const targetProfileId = data.user.id || localStorage.getItem("accountId");
         navigate(targetProfileId ? "/profile/" + encodeURIComponent(targetProfileId) : "/profile");
       } else {
-        alert("Login Failed: " + (data.error || data.message || "Unknown error"));
+        showAlert("Login Failed: " + (data.error || data.message || "Unknown error"), "Login Failed");
       }
     } catch (error) {
       console.error("Error:", error);
-      alert("Something went wrong connecting to the server.");
+      showAlert("Something went wrong connecting to the server.", "Connection Error");
     }
   };
 
   return (
     <div style={styles.page}>
+      <AlertModal
+        open={alertModal.open}
+        title={alertModal.title}
+        message={alertModal.message}
+        onClose={closeAlert}
+      />
       <style>
         {`
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght;500;700;800&family=Playfair+Display:wght;700&display=swap');

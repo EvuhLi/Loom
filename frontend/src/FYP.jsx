@@ -27,7 +27,7 @@ const FYPCard = ({ post, username, onLike, likedPosts, isProtected }) => {
     <div style={styles.card}>
       {/* Artwork */}
       <img
-        src={post.url || ""}
+        src={post.imageUrl || post.url || ""}
         alt={post.title || "Artwork"}
         style={{
           ...styles.cardImage,
@@ -91,15 +91,33 @@ const FYP = ({ username }) => {
   const isScrolling = useRef(false);
   const navigate = useNavigate();
 
+  // Cache key and TTL
+  const FYP_CACHE_KEY = "fyp-cache";
+  const FYP_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
   // ── Fetch FYP feed ─────────────────────────────────────────────────────────
   const fetchFeed = useCallback(async () => {
+    // STALE-WHILE-REVALIDATE: Show cached data immediately
+    try {
+      const cached = localStorage.getItem(FYP_CACHE_KEY);
+      if (cached) {
+        const { ts, posts: cachedPosts } = JSON.parse(cached);
+        if (Date.now() - ts < 5 * 60 * 1000 && Array.isArray(cachedPosts) && cachedPosts.length) {
+          setPosts(cachedPosts);
+          setLoading(false);
+        }
+      }
+    } catch (e) {
+      // Ignore cache errors
+    }
+
     setLoading(true);
     setError("");
     try {
       // Use prop or fallback to localStorage to ensure identity is sent
       const activeUser = username || localStorage.getItem("username");
       
-      const params = new URLSearchParams({ limit: 12, page: 0 }); // Request 12 posts initially
+      const params = new URLSearchParams({ limit: 6, page: 0 }); // Start with 6 for faster load
       if (activeUser && activeUser !== "null" && activeUser !== "undefined") {
         params.set("username", activeUser);
       }
@@ -108,24 +126,18 @@ const FYP = ({ username }) => {
       if (!res.ok) throw new Error(`FYP fetch failed: ${res.status}`);
 
       const data = await res.json();
-      // Eager-load image URLs for all posts
-      const postsWithImages = await Promise.all(
-        (Array.isArray(data) ? data : []).map(async (p) => {
-          const postId = String(p._id || p.id || "");
-          if (!postId) return p;
-          try {
-            const imgRes = await fetch(`${BACKEND_URL}/api/posts/${postId}/image`);
-            if (!imgRes.ok) return p;
-            const imgData = await imgRes.json();
-            return { ...p, url: imgData?.url || p.url };
-          } catch (e) {
-            return p;
-          }
-        })
-      );
-      setPosts(postsWithImages);
+      // Backend already includes url field - no need for additional fetches
+      const postsArray = Array.isArray(data) ? data : [];
+      setPosts(postsArray);
       setCurrentIdx(0);
-          } catch {
+
+      // Cache the results
+      try {
+        localStorage.setItem(FYP_CACHE_KEY, JSON.stringify({ ts: Date.now(), posts: postsArray }));
+      } catch (e) {
+        // Ignore storage errors
+      }
+    } catch (err) {
       console.error("FYP fetch error:", err);
       setError("Couldn't load your feed right now.");
     } finally {

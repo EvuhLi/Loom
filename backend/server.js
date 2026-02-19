@@ -139,9 +139,14 @@ if (!MONGODB_URI) {
 }
 
 mongoose
-  .connect(MONGODB_URI)
+  .connect(MONGODB_URI, {
+    maxPoolSize: 20,        // Increased connection pool for concurrent requests
+    minPoolSize: 5,         // Keep minimum connections warm
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  })
   .then(async () => {
-    console.log("MongoDB connected");
+    console.log("MongoDB connected with optimized pool settings");
     await ensureAdminAccount();
     await ensureIndexes();
   })
@@ -262,15 +267,15 @@ app.get("/api/accounts/id/:id", async (req, res) => {
 app.get("/api/fyp", async (req, res) => {
   const t0 = Date.now();
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 12, 30); // Reduced default to 12
+    const limit = Math.min(parseInt(req.query.limit) || 6, 30); // Reduced default to 6
     const page = Math.max(parseInt(req.query.page) || 0, 0);
     const skip = page * limit;
 
-    // Fetch posts WITHOUT images initially - much faster
+    // Minimal fields for fast initial load (exclude url base64 data)
     const t_query = Date.now();
     const posts = await Post.find(
       {},
-      "_id artistId user postCategory postType title description tags medium likes likedBy date mlTags url"
+      "_id artistId user title previewUrl likes date"
     )
       .sort({ date: -1 })
       .skip(skip)
@@ -281,26 +286,20 @@ app.get("/api/fyp", async (req, res) => {
 
     if (!posts.length) return res.json([]);
 
-    // Serialize posts WITHOUT images - frontend will fetch them on-demand
+    // Minimal serialization for speed - send image URLs separately
     const serializedPosts = posts.map((p) => ({
       _id: p._id.toString(),
       artistId: p.artistId?.toString(),
       user: p.user,
-      postCategory: p.postCategory || "artwork",
-      postType: p.postType || "original",
       title: p.title,
-      description: p.description,
-      tags: p.tags || [],
-      medium: p.medium,
-      url: p.url || "",
-      mlTags: p.mlTags || {}, // Include ML tags for network visualization
+      imageUrl: `/api/posts/${p._id}/image`, // Lazy load images
+      previewUrl: p.previewUrl || "",
       likes: p.likes || 0,
-      likedBy: p.likedBy || [],
       date: p.date,
     }));
 
     console.log(`[FYP] Total time: ${Date.now() - t0}ms`);
-    res.set("Cache-Control", "public, max-age=15");
+    res.set("Cache-Control", "public, max-age=30"); // Increased cache time
     return res.json(serializedPosts);
   } catch (err) {
     console.error("FYP Error:", err.message);
@@ -382,17 +381,33 @@ app.get("/api/posts", async (req, res) => {
     const limitVal = Math.min(parseInt(limit) || 36, 120);
     
     let query = {};
-    // Fast path: exact artistId lookup uses index and avoids regex/$or.
-    if (artistId && mongoose.Types.ObjectId.isValid(String(artistId))) {
-      query = { artistId: new mongoose.Types.ObjectId(String(artistId)) };
-    } else if (username) {
-      // Use normalized lowercase string matching (index-friendly, not regex)
-      query = { user: String(username).trim().toLowerCase() };
+    const rawUsername = username ? String(username).trim() : "";
+    const normalizedUsername = rawUsername.toLowerCase();
+    const artistIdStr = artistId ? String(artistId) : "";
+    const hasArtistIdObject = artistIdStr && mongoose.Types.ObjectId.isValid(artistIdStr);
+    const artistIdOr = [
+      ...(hasArtistIdObject ? [{ artistId: new mongoose.Types.ObjectId(artistIdStr) }] : []),
+      ...(artistIdStr ? [{ artistId: artistIdStr }] : []),
+    ];
+    const userOr = [
+      ...(normalizedUsername ? [{ user: normalizedUsername }] : []),
+      ...(rawUsername && rawUsername !== normalizedUsername ? [{ user: rawUsername }] : []),
+    ];
+
+    // Prefer a precise artistId lookup, but if both artistId and username are provided
+    // allow either to match to avoid empty results when one side is inconsistent.
+    if (artistIdOr.length && userOr.length) {
+      query = { $or: [...artistIdOr, ...userOr] };
+    } else if (artistIdOr.length) {
+      // Use direct query when only one condition for optimal index usage
+      query = artistIdOr.length === 1 ? artistIdOr[0] : { $or: artistIdOr };
+    } else if (userOr.length) {
+      query = userOr.length === 1 ? userOr[0] : { $or: userOr };
     }
 
     const t_query = Date.now();
     const queryBuilder = Post.find(query)
-      .select("_id artistId user previewUrl title description tags medium postCategory postType likes likedBy date");
+      .select("_id artistId user previewUrl title likes date");  // Minimal fields for grid view
     
     // Use case-insensitive collation if querying by username
     if (query.user) {
@@ -404,23 +419,19 @@ app.get("/api/posts", async (req, res) => {
       .limit(limitVal)
       .maxTimeMS(8000)
       .lean();
-    console.log(`[Posts] Find query: ${Date.now() - t_query}ms`);
+    console.log(`[Posts] Find query: ${Date.now() - t_query}ms`, query);
       
     const normalized = posts.map((p) => ({
       _id: String(p._id),
       artistId: p.artistId ? String(p.artistId) : p.artistId,
       user: p.user,
-      url: p.previewUrl || "",
+      url: p.previewUrl || p.url || "",
+      previewUrl: p.previewUrl || "",
       title: p.title,
-      description: p.description,
-      tags: p.tags || [],
-      medium: p.medium,
-      postCategory: p.postCategory || "artwork",
-      postType: p.postType || "original",
       likes: p.likes || 0,
-      likedBy: p.likedBy || [],
       date: p.date,
-      // STRIPPED: processSlides, comments, mlTags to reduce payload size
+      // STRIPPED: description, tags, medium, postCategory, postType, likedBy, processSlides, comments, mlTags
+      // Grid view only needs minimal data - fetch full post when opening modal
       // Use /api/posts/:id/full endpoint if full data needed
     }));
     
@@ -1002,12 +1013,13 @@ app.patch("/api/accounts/:id/profile-pic", async (req, res) => {
 app.get("/api/accounts/:username", async (req, res) => {
   const t0 = Date.now();
   try {
-    const { username } = req.params;
+    const usernameRaw = String(req.params.username || "").trim();
+    const usernameRegex = new RegExp(`^${escapeRegex(usernameRaw)}$`, "i");
 
-    let account = await Account.findOne({ username });
-    if (!account) account = await Account.create({ username });
+    let account = await Account.findOne({ username: usernameRegex });
+    if (!account) account = await Account.create({ username: usernameRaw });
 
-    console.log(`[Accounts] ${username}: ${Date.now() - t0}ms`);
+    console.log(`[Accounts] ${usernameRaw}: ${Date.now() - t0}ms`);
     res.json(account);
   } catch (err) {
     console.error("Account Error:", err);
@@ -1403,8 +1415,9 @@ app.post("/api/behavior/recompute", async (req, res) => {
 // START SERVER
 // =============================
 
-// SPA fallback: serve index.html for any non-API routes
-app.get("*", (req, res) => {
+// SPA fallback: serve index.html for any non-API routes (Express 5 compatible)
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) return next();
   res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
 });
 

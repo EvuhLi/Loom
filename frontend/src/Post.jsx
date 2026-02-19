@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, memo, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { GiShirtButton } from "react-icons/gi";
+import AlertModal from "./components/AlertModal";
 
 const drawImageToCanvas = (canvas, img, fit = "cover") => {
   if (!canvas || !img) return;
@@ -196,6 +197,15 @@ const Post = ({
   addComment,
   deletePost
 }) => {
+  const [alertModal, setAlertModal] = useState({ open: false, title: "Notice", message: "" });
+
+  const showAlert = (message, title = "Notice") => {
+    setAlertModal({ open: true, title, message });
+  };
+
+  const closeAlert = () => {
+    setAlertModal((prev) => ({ ...prev, open: false }));
+  };
   // Local state to prevent rapid-fire clicking
   const [isProcessing, setIsProcessing] = useState(false);
   // Local optimistic state to reduce lag and avoid transient negative counts
@@ -345,6 +355,12 @@ const Post = ({
 
   return (
     <>
+      <AlertModal
+        open={alertModal.open}
+        title={alertModal.title}
+        message={alertModal.message}
+        onClose={closeAlert}
+      />
       <div style={styles.grid} className="post-grid">
         {posts.map((post) => (
           <div
@@ -355,7 +371,7 @@ const Post = ({
           >
             <div style={styles.artworkWrapper}>
               <CanvasImage
-                src={post.url}
+                src={post.url || post.previewUrl || ""}
                 fit="cover"
                 canvasStyle={{ filter: isProtected ? "blur(30px)" : "none" }}
               />
@@ -368,7 +384,7 @@ const Post = ({
             <div
               onContextMenu={(e) => {
                 e.preventDefault();
-                alert("Image export restricted.");
+                showAlert("Image export restricted.", "Access Restricted");
               }}
               className="post-grid-overlay"
               style={styles.gridOverlay}

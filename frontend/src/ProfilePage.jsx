@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import Post from "./Post";
+import AlertModal from "./components/AlertModal";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 
@@ -151,6 +152,15 @@ const ProfilePage = () => {
   const [bioEditValue, setBioEditValue] = useState("");
   const [isUpdatingBio, setIsUpdatingBio] = useState(false);
   const [cachedFollowState, setCachedFollowState] = useState(null);
+  const [alertModal, setAlertModal] = useState({ open: false, title: "Notice", message: "" });
+
+  const showAlert = (message, title = "Notice") => {
+    setAlertModal({ open: true, title, message });
+  };
+
+  const closeAlert = () => {
+    setAlertModal((prev) => ({ ...prev, open: false }));
+  };
 
   const defaultUser = {
     username: storedUsername || "loom_artist_01",
@@ -235,7 +245,8 @@ const ProfilePage = () => {
     return String(value);
   };
 
-  const visiblePosts = posts.filter((post) => {
+  const visiblePosts = (() => {
+    const filtered = posts.filter((post) => {
     const postArtistId = normalizeId(
       post.artistId || (typeof post.user === "object" ? post.user._id : undefined)
     );
@@ -263,8 +274,13 @@ const ProfilePage = () => {
       return postUsername === profileOwnerUsername;
     }
     
-    return true;
-  });
+      return true;
+    });
+
+    // If API already scoped results but filter was too strict, show all posts.
+    if (filtered.length === 0 && posts.length > 0) return posts;
+    return filtered;
+  })();
   
   useEffect(() => {
     if (!resolvedArtistId && storedUsername) {
@@ -275,16 +291,22 @@ const ProfilePage = () => {
     setProfileError("");
     setIsPostsLoading(true);
 
-    // Fast path: hydrate from cache if fresh
+    // STALE-WHILE-REVALIDATE: Show cached data immediately, then fetch fresh data
+    let usedCache = false;
     try {
       const cachedRaw = localStorage.getItem(profileCacheKey);
       if (cachedRaw) {
         const cached = JSON.parse(cachedRaw);
-        if (cached?.ts && Date.now() - cached.ts < profileCacheTTL) {
-          if (cached.user) setUser(cached.user);
+        // Show cache even if stale (up to 5 minutes old), then refresh in background
+        if (cached?.ts && Date.now() - cached.ts < 5 * 60 * 1000) {
+          if (cached.user) {
+            setUser(cached.user);
+            usedCache = true;
+          }
           if (Array.isArray(cached.posts)) {
             setPosts(cached.posts);
             setIsPostsLoading(false);
+            usedCache = true;
           }
         }
       }
@@ -298,7 +320,7 @@ const ProfilePage = () => {
           const params = new URLSearchParams();
           if (artistIdValue) params.set("artistId", String(artistIdValue));
           if (usernameValue) params.set("username", String(usernameValue));
-          params.set("limit", "12");
+          params.set("limit", "6");
           return `${BACKEND_URL}/api/posts${params.toString() ? `?${params}` : ""}`;
         };
 
@@ -311,23 +333,13 @@ const ProfilePage = () => {
           .then((res) => (res.ok ? res.json() : []))
           .catch(() => []);
 
-        // PARALLEL FETCH: Fetch account and viewer in parallel to reduce waterfall latency
+        // OPTIMIZED: Only fetch profile account, skip viewer fetch to reduce latency
         const accountUrl = activeArtistId
           ? `${BACKEND_URL}/api/accounts/id/${encodeURIComponent(activeArtistId)}`
           : `${BACKEND_URL}/api/accounts/${encodeURIComponent(defaultUser.username)}`;
         
-        const viewerFetchPromise = viewer
-          ? Promise.resolve(null) // Already have viewer, skip fetch
-          : fetch(`${BACKEND_URL}/api/accounts/${encodeURIComponent(defaultUser.username)}`)
-              .then((res) => res.ok ? res.json() : null)
-              .catch((err) => {
-                console.warn("Could not load default viewer account:", err);
-                return null;
-              });
-
-        // Fetch both account and viewer requests in parallel
+        // Fetch account immediately
         const accountPromise = fetch(accountUrl);
-        const viewerPromise = viewerFetchPromise;
 
         const initialPosts = await initialPostsPromise;
         if (Array.isArray(initialPosts)) {
@@ -335,10 +347,7 @@ const ProfilePage = () => {
           setIsPostsLoading(false);
         }
 
-        const [accountRes, viewerData] = await Promise.all([
-          accountPromise,
-          viewerPromise,
-        ]);
+        const accountRes = await accountPromise;
 
         let loadedUser = null;
         if (accountRes.ok) {
@@ -346,11 +355,6 @@ const ProfilePage = () => {
           setUser(loadedUser);
         } else {
           setProfileError("Could not load artist profile.");
-        }
-
-        if (viewerData) {
-          setViewer(viewerData);
-          console.log("Loaded default viewer account:", viewerData);
         }
 
         const targetArtistId = normalizeId(loadedUser?._id || activeArtistId);
@@ -364,6 +368,7 @@ const ProfilePage = () => {
         const finalPostsUrl = buildPostsUrl(targetArtistId, targetUsername);
         let postsData = initialPosts;
 
+        // Only fetch again if params actually changed to avoid duplicate network call
         if (finalPostsUrl !== initialPostsUrl) {
           const postsRes = await fetch(finalPostsUrl);
           if (!postsRes.ok) {
@@ -372,9 +377,19 @@ const ProfilePage = () => {
             return;
           }
           postsData = await postsRes.json();
+        } else {
+          // Params match, use cached initial posts to avoid redundant fetch
+          console.log("[ProfilePage] Skipping redundant posts fetch, using initial data");
         }
         if (reqSeq !== postsReqSeqRef.current) return;
         const normalizedPosts = Array.isArray(postsData) ? postsData : [];
+        console.log("[ProfilePage] Posts fetched:", {
+          count: normalizedPosts.length,
+          sample: normalizedPosts[0],
+          targetArtistId,
+          targetUsername,
+          finalPostsUrl,
+        });
         setPosts(normalizedPosts);
         setIsPostsLoading(false);
 
@@ -441,12 +456,12 @@ const ProfilePage = () => {
 
   const handleSaveProfilePic = async () => {
     if (!isOwnProfile) {
-      alert("You can only change your own profile picture.");
+      showAlert("You can only change your own profile picture.");
       return;
     }
     if (!newProfilePicFile) return;
     if (!profileOwnerId || !currentUserId) {
-      alert("Could not verify account ownership.");
+      showAlert("Could not verify account ownership.");
       return;
     }
     const reader = new FileReader();
@@ -474,11 +489,19 @@ const ProfilePage = () => {
         setViewer((prev) =>
           normalizeId(prev?._id) === normalizeId(updated?._id) ? updated : prev
         );
+        try {
+          localStorage.setItem(
+            profileCacheKey,
+            JSON.stringify({ ts: Date.now(), user: updated, posts })
+          );
+        } catch (e) {
+          // ignore cache write errors
+        }
         setIsProfileUploadOpen(false);
         setNewProfilePicFile(null);
       } catch (err) {
         console.error("Save profile picture failed:", err);
-        alert("Failed to save profile picture.");
+        showAlert("Failed to save profile picture.");
       }
     };
     reader.readAsDataURL(newProfilePicFile);
@@ -496,7 +519,7 @@ const ProfilePage = () => {
 
   const handleSaveBio = async () => {
     if (!isOwnProfile) {
-      alert("You can only edit your own bio.");
+      showAlert("You can only edit your own bio.");
       return;
     }
     setIsUpdatingBio(true);
@@ -534,7 +557,7 @@ const ProfilePage = () => {
       handleCloseBioModal();
     } catch (err) {
       console.error("Bio update failed:", err);
-      alert("Failed to update bio: " + err.message);
+      showAlert("Failed to update bio: " + err.message);
     } finally {
       setIsUpdatingBio(false);
     }
@@ -542,7 +565,7 @@ const ProfilePage = () => {
 
   const handleCreatePost = async () => {
     if (!isOwnProfile) {
-      alert("You can only create posts on your own profile.");
+      showAlert("You can only create posts on your own profile.");
       return;
     }
     const filesToProcess = [newImageFile, ...newProcessFiles].filter(Boolean);
@@ -587,7 +610,7 @@ const ProfilePage = () => {
         setScanStatus(`Checking AI (${i + 1}/${filesToProcess.length})...`);
         const isAI = await checkIsAI(filesToProcess[i]);
         if (isAI) {
-          alert(`BLOCKED: AI Generation detected in slide ${i + 1}.`);
+          showAlert(`BLOCKED: AI Generation detected in slide ${i + 1}.`);
           return;
         }
         setScanStatus(`Applying protection (${i + 1}/${filesToProcess.length})...`);
@@ -667,7 +690,7 @@ const ProfilePage = () => {
       if (!response.ok) {
         const errorData = await response.json();
         console.error("Post creation failed:", errorData);
-        alert(`Failed to create post: ${errorData.message || response.statusText}`);
+        showAlert(`Failed to create post: ${errorData.message || response.statusText}`);
         return;
       }
 
@@ -683,7 +706,7 @@ const ProfilePage = () => {
       setNewProcessFiles([]);
     } catch (error) {
       console.error("Create Post Error:", error);
-      alert("Error creating post. Check console for details.");
+      showAlert("Error creating post. Check console for details.");
     } finally {
       setIsScanning(false);
       setScanStatus("");
@@ -725,17 +748,23 @@ const ProfilePage = () => {
 
   const hasViewerIdentity = Boolean(currentUserId || currentUsername);
   const hasOwnerIdentity = Boolean(profileOwnerId || profileOwnerUsername || resolvedArtistId);
-  const isOwnProfileOptimistic =
-    !resolvedArtistId &&
-    (Boolean(storedAccountId) || Boolean(storedUsername));
+  
+  // OPTIMISTIC: Use localStorage immediately to determine ownership without waiting for API
+  const isOwnProfileOptimistic = resolvedArtistId
+    ? Boolean(storedAccountId && String(storedAccountId) === String(resolvedArtistId))
+    : Boolean(storedUsername && storedUsername === profileOwnerUsername);
+  
   const isIdentityResolved = hasViewerIdentity && hasOwnerIdentity;
 
-  const isOwnProfile = resolvedArtistId
-    ? Boolean(currentUserId && String(currentUserId) === String(resolvedArtistId))
-    : Boolean(
-        (currentUserId && profileOwnerId && String(currentUserId) === String(profileOwnerId)) ||
-          (currentUsername && profileOwnerUsername && currentUsername === profileOwnerUsername)
-      );
+  // Fallback to full identity check once API data loads, but prefer optimistic check
+  const isOwnProfile = isOwnProfileOptimistic || (
+    resolvedArtistId
+      ? Boolean(currentUserId && String(currentUserId) === String(resolvedArtistId))
+      : Boolean(
+          (currentUserId && profileOwnerId && String(currentUserId) === String(profileOwnerId)) ||
+            (currentUsername && profileOwnerUsername && currentUsername === profileOwnerUsername)
+        )
+  );
 
   const isFollowingProfile = Boolean(
     !isOwnProfile &&
@@ -789,7 +818,7 @@ const ProfilePage = () => {
       }
     } catch (err) {
       console.error("Follow toggle failed:", err);
-      alert("Could not update follow state.");
+      showAlert("Could not update follow state.");
     } finally {
       setIsTogglingFollow(false);
     }
@@ -813,6 +842,12 @@ const ProfilePage = () => {
 
   return (
     <div style={styles.pageBackground}>
+      <AlertModal
+        open={alertModal.open}
+        title={alertModal.title}
+        message={alertModal.message}
+        onClose={closeAlert}
+      />
       <style>
         {`
             @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Lato:wght@300;400;700&display=swap');
@@ -894,7 +929,7 @@ const ProfilePage = () => {
                   ? "Loading..."
                   : (user && user.username) || defaultUser.username}
               </h2>
-              {isOwnProfileOptimistic ? (
+              {isOwnProfile ? (
                 <button
                   style={styles.primaryBtn}
                   onClick={() => setIsNewPostOpen(true)}
@@ -902,15 +937,7 @@ const ProfilePage = () => {
                 >
                   + New Art
                 </button>
-              ) : !isIdentityResolved ? null : isOwnProfile ? (
-                <button
-                  style={styles.primaryBtn}
-                  onClick={() => setIsNewPostOpen(true)}
-                  disabled={isScanning}
-                >
-                  + New Art
-                </button>
-              ) : (
+              ) : !isIdentityResolved ? null : (
                 <button
                   style={styles.secondaryBtn}
                   onClick={handleFollowToggle}
