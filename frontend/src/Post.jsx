@@ -261,7 +261,7 @@ const Post = ({
     try {
       setCommentsLoading(true);
       const res = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'}/api/posts/${postId}/comments?page=${page}&limit=${COMMENTS_PER_PAGE}`
+        `${import.meta.env.VITE_BACKEND_URL || ''}/api/posts/${postId}/comments?page=${page}&limit=${COMMENTS_PER_PAGE}`
       );
       if (!res.ok) throw new Error("Failed to fetch comments");
       const data = await res.json();

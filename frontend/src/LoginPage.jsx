@@ -5,7 +5,7 @@ import AlertModal from "./components/AlertModal";
 import "./App.css";
 import collageBg from "./assets/collage.jpg";
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "";
 
 export default function LoginPage() {
   const navigate = useNavigate();

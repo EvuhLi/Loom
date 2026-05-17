@@ -5,7 +5,7 @@ import AlertModal from "./components/AlertModal";
 import "./App.css";
 import weavingBg from "./assets/weaving_loom.jpg";
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "";
 
 export default function SignUpPage() {
   const navigate = useNavigate();

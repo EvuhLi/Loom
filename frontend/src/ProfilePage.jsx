@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import Post from "./Post";
 import AlertModal from "./components/AlertModal";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
 
 // ==========================================
 // 1. PROTECTION UTILITIES
@@ -22,13 +22,25 @@ const applyCloak = (ctx, width, height) => {
   ctx.putImageData(imageData, 0, 0);
 };
 
+const resizeImageForApi = (file, maxPx = 1024, quality = 0.8) =>
+  new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality).split(",")[1]);
+    };
+    img.src = url;
+  });
+
 const checkIsAI = async (file) => {
   try {
-    const base64Image = await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(",")[1]);
-      reader.readAsDataURL(file);
-    });
+    const base64Image = await resizeImageForApi(file);
     const response = await fetch(`${BACKEND_URL}/api/check-ai`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -476,25 +488,40 @@ const ProfilePage = () => {
       return;
     }
     if (!newProfilePicFile) return;
-    if (!profileOwnerId || !currentUserId) {
+    const effectiveUserId = currentUserId || storedAccountId;
+    const effectiveOwnerId = profileOwnerId || storedAccountId;
+    if (!effectiveOwnerId || !effectiveUserId) {
       showAlert("Could not verify account ownership.");
       return;
     }
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      try {
-        const base64String = reader.result;
-        const response = await fetch(
-          `${BACKEND_URL}/api/accounts/${encodeURIComponent(profileOwnerId)}/profile-pic`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              actorAccountId: currentUserId,
-              profilePic: base64String,
-            }),
-          }
-        );
+    try {
+      const resizedDataUrl = await new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(newProfilePicFile);
+        img.onload = () => {
+          const maxPx = 400;
+          const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
+        };
+        img.onerror = reject;
+        img.src = url;
+      });
+      const response = await fetch(
+        `${BACKEND_URL}/api/accounts/${encodeURIComponent(effectiveOwnerId)}/profile-pic`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actorAccountId: effectiveUserId,
+            profilePic: resizedDataUrl,
+          }),
+        }
+      );
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.error || "Failed to save profile picture");
@@ -513,14 +540,12 @@ const ProfilePage = () => {
         } catch (e) {
           // ignore cache errors
         }
-        setIsProfileUploadOpen(false);
-        setNewProfilePicFile(null);
-      } catch (err) {
-        console.error("Save profile picture failed:", err);
-        showAlert("Failed to save profile picture.");
-      }
-    };
-    reader.readAsDataURL(newProfilePicFile);
+      setIsProfileUploadOpen(false);
+      setNewProfilePicFile(null);
+    } catch (err) {
+      console.error("Save profile picture failed:", err);
+      showAlert("Failed to save profile picture.");
+    }
   };
 
   const handleOpenBioModal = () => {

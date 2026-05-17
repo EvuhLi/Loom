@@ -7,21 +7,21 @@ const mongoose = require("mongoose");
 const nodeFetch = require("node-fetch");
 const FormData = require("form-data");
 const crypto = require("crypto");
-const path = require("path");
 
 const Post = require("./models/Post");
 const Account = require("./models/Account");
 const ActivityLog = require("./models/ActivityLog");
+const AdminSession = require("./models/AdminSession");
+const Community = require("./models/Community");
 const { logActivityEvent } = require("./services/behaviorTracking");
 const { runBehaviorAnalysisBatch } = require("./services/behaviorAnalysis");
 
 const app = express();
 
 app.use(cors());
-app.use(compression({ level: 6, threshold: 1024 })); // Gzip responses > 1KB
+app.use(compression({ level: 6, threshold: 1024 }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(express.static(path.join(__dirname, "../frontend/dist")));
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -44,19 +44,15 @@ function escapeRegex(text = "") {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function createAdminSessionToken() {
+async function createAdminSessionToken() {
   const token = crypto.randomBytes(32).toString("hex");
-  adminSessions.set(token, Date.now() + ADMIN_SESSION_TTL_MS);
+  await AdminSession.create({ token, expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS) });
   return token;
 }
-function isValidAdminSession(token = "") {
-  const expiry = adminSessions.get(token);
-  if (!expiry) return false;
-  if (Date.now() > expiry) {
-    adminSessions.delete(token);
-    return false;
-  }
-  return true;
+
+async function isValidAdminSession(token = "") {
+  const session = await AdminSession.findOne({ token, expiresAt: { $gt: new Date() } }).lean();
+  return Boolean(session);
 }
 
 function requireAdmin(req, res, next) {
@@ -65,10 +61,10 @@ function requireAdmin(req, res, next) {
     return res.status(401).json({ error: "Admin authorization required" });
   }
   const token = auth.slice("Bearer ".length).trim();
-  if (!isValidAdminSession(token)) {
-    return res.status(403).json({ error: "Invalid or expired admin session" });
-  }
-  next();
+  isValidAdminSession(token).then((valid) => {
+    if (!valid) return res.status(403).json({ error: "Invalid or expired admin session" });
+    next();
+  }).catch(() => res.status(500).json({ error: "Internal Server Error" }));
 }
 
 async function ensureAdminAccount() {
@@ -130,30 +126,34 @@ const HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/umm-mayb
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "loomadmin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "loomadmin";
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const adminSessions = new Map();
 
 // =============================
 // DATABASE
 // =============================
 
 if (!MONGODB_URI) {
-  console.error("❌ Missing MONGODB_URI in .env");
-  process.exit(1);
+  console.error("❌ Missing MONGODB_URI env var");
 }
 
-mongoose
-  .connect(MONGODB_URI, {
-    maxPoolSize: 20,        // Increased connection pool for concurrent requests
-    minPoolSize: 5,         // Keep minimum connections warm
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-  })
-  .then(async () => {
-    console.log("MongoDB connected with optimized pool settings");
-    await ensureAdminAccount();
-    await ensureIndexes();
-  })
-  .catch((err) => console.error("MongoDB connection error:", err));
+let _mongooseReady = false;
+if (MONGODB_URI) {
+  mongoose
+    .connect(MONGODB_URI, {
+      maxPoolSize: 10,
+      minPoolSize: 0,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    })
+    .then(async () => {
+      if (!_mongooseReady) {
+        _mongooseReady = true;
+        await ensureAdminAccount();
+        await ensureIndexes();
+      }
+      console.log("MongoDB connected");
+    })
+    .catch((err) => console.error("MongoDB connection error:", err));
+}
 
 // =============================
 // AI DETECTION PROXY
@@ -871,7 +871,7 @@ app.post("/api/auth/login", async (req, res) => {
       const adminAccount = await Account.findOne({
         username: new RegExp(`^${escapeRegex(ADMIN_USERNAME)}$`, "i"),
       }).lean();
-      const adminToken = createAdminSessionToken();
+      const adminToken = await createAdminSessionToken();
       return res.json({
         message: "Admin login successful",
         user: {
@@ -1451,23 +1451,13 @@ app.post("/api/behavior/recompute", async (req, res) => {
 // START SERVER
 // =============================
 
-// SPA fallback: serve index.html for any non-API routes (Express 5 compatible)
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api")) return next();
-  res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
-});
-
-app.listen(PORT, () =>
-  console.log(`🚀 Backend running on http://localhost:${PORT}`)
-);
-
 // Public search users endpoint
 app.get("/api/search/users", async (req, res) => {
   try {
     const search = String(req.query.search || "").trim();
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
 
-    const query = { role: { $ne: "admin" } }; // Exclude admins
+    const query = { role: { $ne: "admin" } };
     if (search) {
       query.username = new RegExp(escapeRegex(search), "i");
     }
@@ -1484,14 +1474,22 @@ app.get("/api/search/users", async (req, res) => {
   }
 });
 
-if ((process.env.BEHAVIOR_ANALYSIS_ENABLED || "true").toLowerCase() !== "false") {
-  const intervalMs = Math.max(
-    Number(process.env.BEHAVIOR_ANALYSIS_INTERVAL_MS) || 15 * 60 * 1000,
-    60 * 1000
-  );
-  setInterval(() => {
-    runBehaviorAnalysisBatch().catch((err) =>
-      console.warn("Behavior batch error:", err.message || err)
+if (require.main === module) {
+  if ((process.env.BEHAVIOR_ANALYSIS_ENABLED || "true").toLowerCase() !== "false") {
+    const intervalMs = Math.max(
+      Number(process.env.BEHAVIOR_ANALYSIS_INTERVAL_MS) || 15 * 60 * 1000,
+      60 * 1000
     );
-  }, intervalMs);
+    setInterval(() => {
+      runBehaviorAnalysisBatch().catch((err) =>
+        console.warn("Behavior batch error:", err.message || err)
+      );
+    }, intervalMs);
+  }
+
+  app.listen(PORT, () =>
+    console.log(`🚀 Backend running on http://localhost:${PORT}`)
+  );
 }
+
+module.exports = app;

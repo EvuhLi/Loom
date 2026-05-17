@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AlertModal from "./components/AlertModal";
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "";
 
 function fmtPct(v) {
   const n = Number(v || 0);
