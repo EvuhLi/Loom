@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, memo, useMemo } from "react";
+import React, { useEffect, useRef, useState, memo } from "react";
 import { Link } from "react-router-dom";
 import { GiShirtButton } from "react-icons/gi";
 import AlertModal from "./components/AlertModal";
@@ -79,7 +79,7 @@ const CanvasImage = ({ src, fit = "cover", canvasStyle }) => {
 // ==========================================
 // MEMOIZED COMMENT COMPONENT
 // ==========================================
-const CommentItem = memo(({ comment, index }) => {
+const CommentItem = memo(({ comment }) => {
   return (
     <div
       style={{
@@ -285,7 +285,7 @@ const Post = ({
   const fetchFullPost = async (postId) => {
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL || "http://localhost:3001"}/api/posts/${postId}/full`
+        `${import.meta.env.VITE_BACKEND_URL || ""}/api/posts/${postId}/full`
       );
       if (!res.ok) return;
       const fullPost = await res.json();
