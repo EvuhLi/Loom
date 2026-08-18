@@ -18,6 +18,15 @@ app.use(compression({ level: 6, threshold: 1024 }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+// =============================
+// ENV
+// =============================
+
+const PORT = process.env.PORT || 3001;
+const MONGODB_URI = process.env.MONGODB_URI;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "loomadmin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "loomadmin";
+
 async function ensureAdminAccount() {
   const usernameRegex = new RegExp(`^${escapeRegex(ADMIN_USERNAME)}$`, "i");
   const existing = await Account.findOne({ username: usernameRegex });
@@ -63,15 +72,6 @@ async function ensureIndexes() {
     console.warn("Index creation warning:", e.message);
   }
 }
-
-// =============================
-// ENV
-// =============================
-
-const PORT = process.env.PORT || 3001;
-const MONGODB_URI = process.env.MONGODB_URI;
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "loomadmin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "loomadmin";
 
 // =============================
 // DATABASE
