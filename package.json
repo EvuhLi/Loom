@@ -13,6 +13,7 @@
     "concurrently": "^9.2.1"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1112.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "d3": "^7.9.0",
